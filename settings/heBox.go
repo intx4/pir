@@ -4,7 +4,6 @@ import (
 	"errors"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
-	"math"
 )
 
 /*
@@ -35,13 +34,13 @@ func NewHeBox(PC *PirContext) (*HeBox, error) {
 	//to do: add checks at some point to make sure that depth is aligned with levels
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
 		LogN: PC.N,
-		LogQ: QI[int(math.Pow(2.0, float64(PC.N)))], //this is actually QP from the RNS BFV paper
+		LogQ: QI[1<<PC.N], //this is actually QP from the RNS BFV paper
 		T:    uint64(65537),
 	})
 	if err != nil {
 		return nil, err
 	}
-	box := &HeBox{Params: params, Ecd: nil, Evt: nil}
+	box := &HeBox{Params: params, Ecd: bfv.NewEncoder(params)}
 	return box, nil
 }
 

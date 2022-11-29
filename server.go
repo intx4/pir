@@ -28,7 +28,9 @@ func (PE *PIREntry) Update(newValue []byte, maxBinSize int) (int, error) {
 		return -1, errors.New(fmt.Sprintf("Byte length of data stored in this entry is not uniform. Old %d, new %d", PE.L, len(newValue)))
 	}
 	if PE.Items+1 > maxBinSize {
-		return -1, errors.New(fmt.Sprintf("Entry size exceeded maximum bin size: %d > %d", PE.Items+1, maxBinSize))
+		PE.Value = append(PE.Value, newValue...)
+		PE.Items++
+		return PE.Items - 1, errors.New(fmt.Sprintf("Entry size exceeded maximum bin size: %d > %d", PE.Items+1, maxBinSize))
 	}
 	PE.Value = append(PE.Value, newValue...)
 	PE.Items++
@@ -60,7 +62,7 @@ func (PE *PIREntry) Delete(pos int) error {
 	return nil
 }
 
-func (PE *PIREntry) Encode(t int, n int, box *settings.HeBox) ([]*bfv.PlaintextMul, error) {
+func (PE *PIREntry) Encode(t int, box *settings.HeBox) ([]*bfv.PlaintextMul, error) {
 	chunks, err := utils.Chunkify(PE.Value, t)
 	if err != nil {
 		return nil, err
@@ -90,7 +92,7 @@ func NewPirServer(c *settings.PirContext, b *settings.HeBox, keys [][]byte, valu
 			//update
 			collisions, err := e.Update(values[i], c.MaxBinSize)
 			if err != nil {
-				return nil, err
+				fmt.Errorf(err.Error())
 			}
 			if collisions+1 > maxCollisions {
 				maxCollisions = collisions + 1
@@ -100,20 +102,20 @@ func NewPirServer(c *settings.PirContext, b *settings.HeBox, keys [][]byte, valu
 			PS.Store[k] = NewPirEntry(values[i])
 		}
 	}
-	fmt.Printf("	Storage encoded in chunks : Max size of bucket = %d\n", maxCollisions)
+	fmt.Printf("	Storage encoded in chunks : Max size of bucket = %d --> Optimal = %d\n", maxCollisions, PS.Context.MaxBinSize)
 	return PS, nil
 }
 
-func (PS *PIRServer) Encode() error {
+func (PS *PIRServer) Encode() (map[string][]*bfv.PlaintextMul, error) {
 	ecdStore := make(map[string][]*bfv.PlaintextMul)
 	for k, e := range PS.Store {
-		v, err := e.Encode(PS.Context.T, PS.Context.N, PS.Box)
+		v, err := e.Encode(PS.Context.TUsable, PS.Box)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		ecdStore[k] = v
 	}
-	return nil
+	return ecdStore, nil
 }
 
 // Recursive function to generate keys at depth nextdepth = currdepth+1 (depth is a dimention)

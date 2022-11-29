@@ -37,7 +37,7 @@ var genF = func(c float64) func(x float64) float64 {
 	}
 }
 
-func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable int, MaxBinSize int) (*PirContext, error) {
+func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable int) (*PirContext, error) {
 	if Dimentions < 0 || Dimentions > 3 {
 		return nil, errors.New("Hypercube dimention can be 0 to 3")
 	}
@@ -48,15 +48,15 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 	maxIter := 1000
 	for maxIter > 0 {
 		K := math.Pow(base, float64(Dimentions))
-		c := float64(Size) / (K * math.Log(K))
+		c := float64(Items) / (K * math.Log(K))
 		prob := nonlin.Problem{F: func(out, x []float64) {
 			out[0] = 1.0 + x[0]*(math.Log(c)-math.Log(x[0])+1.0) - c
 		}}
 		solver := nonlin.NewtonKrylov{
 			// Maximum number of Newton iterations
-			Maxiter: 1000,
+			Maxiter: 1e9,
 
-			// Stepsize used to appriximate jacobian with finite differences
+			// Stepsize used to approximate jacobian with finite differences
 			StepSize: 1e-2,
 
 			// Tolerance for the solution
@@ -70,7 +70,7 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 				break
 			}
 		}
-		if math.Floor((dc+1)*math.Log(K)) > float64(MaxBinSize) {
+		if math.Floor((dc+1)*math.Log(K)) < float64(PC.MaxBinSize) {
 			PC.K = int(K)
 			PC.Kd = int(base)
 			break

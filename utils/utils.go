@@ -1,7 +1,8 @@
 package utils
 
 import (
-	"crypto"
+	"crypto/md5"
+	"crypto/sha1"
 	"errors"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"math"
@@ -107,12 +108,13 @@ func EncodeChunks(chunks []uint64, box *settings.HeBox) []*bfv.PlaintextMul {
 	numPts := int(math.Ceil(float64(len(chunks)) / float64(box.Params.N())))
 	pts := make([]*bfv.PlaintextMul, numPts)
 	pti := 0
-	for i := 0; i < len(chunks); box.Params.N() {
+	for i := 0; i < len(chunks); i = i + box.Params.N() {
 		if i+box.Params.N() >= len(chunks) {
 			pts[pti] = box.Ecd.EncodeMulNew(chunks[i:], box.Params.MaxLevel())
 		} else {
 			pts[pti] = box.Ecd.EncodeMulNew(chunks[i:i+box.Params.N()], box.Params.MaxLevel())
 		}
+		pti++
 	}
 	return pts
 }
@@ -129,7 +131,6 @@ func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 		} else {
 			bins[i] = "0"
 		}
-
 	}
 	if allZero {
 		return nil, nil
@@ -140,15 +141,21 @@ func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 		if bins[i] == "0" {
 			lastZero = i
 		} else {
-			//make the string at pos i-th of exactly t bits
-			for len(bins[i]) < tBits {
-				bins[i] = "0" + bins[i]
-			}
+			break
 		}
 	}
+
 	if bins[lastZero] == "0" {
 		bins = bins[:lastZero]
 	}
+
+	for i := 0; i < len(bins); i++ {
+		//make the string at pos i-th of exactly t bits
+		for len(bins[i]) < tBits {
+			bins[i] = "0" + bins[i]
+		}
+	}
+
 	b := ""
 	for _, s := range bins {
 		b += s
@@ -162,15 +169,19 @@ func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 
 // Maps a key to a list of dimentions integers, each in [0,dimSize), as string idx1|...|idxdimentions
 func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
-	h1 := crypto.MD5.New().Sum(key)
-	h2 := crypto.SHA1.New().Sum(key)
+	h1 := md5.New()
+	h1.Write(key)
+	d1 := h1.Sum(nil)
+	h2 := sha1.New()
+	h2.Write(key)
+	d2 := h2.Sum(nil)
 
 	coords := ""
 	coordsAsInt := make([]int, dimentions)
 	for i := 0; i < dimentions; i++ {
-		x := new(big.Int).SetBytes(h1)
-		y := new(big.Int).SetBytes(h2)
-		y.Mul(y, new(big.Int).SetInt64(int64(i)))
+		x := new(big.Int).SetBytes(d1)
+		y := new(big.Int).SetBytes(d2)
+		y.Mul(y, new(big.Int).SetInt64(int64(i+1)))
 		x.Add(x, y)
 		x.Mod(x, new(big.Int).SetInt64(int64(dimSize)))
 		coords += x.Text(10) + VALUE_SEPARATOR
