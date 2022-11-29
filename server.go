@@ -102,7 +102,7 @@ func NewPirServer(c *settings.PirContext, b *settings.HeBox, keys [][]byte, valu
 			PS.Store[k] = NewPirEntry(values[i])
 		}
 	}
-	fmt.Printf("	Storage encoded in chunks : Max size of bucket = %d / Expected %d --> Optimal = %d\n", maxCollisions, PS.Context.ExpectedBinSize, PS.Context.MaxBinSize)
+	fmt.Printf("	Storage encoded in chunks : Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n", maxCollisions, PS.Context.ExpectedBinSize, PS.Context.MaxBinSize)
 	return PS, nil
 }
 

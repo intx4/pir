@@ -2,7 +2,6 @@ package utils
 
 import (
 	"crypto/md5"
-	"crypto/sha1"
 	"errors"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"math"
@@ -168,24 +167,43 @@ func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 }
 
 // Maps a key to a list of dimentions integers, each in [0,dimSize), as string idx1|...|idxdimentions
+//func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
+//	h1 := md5.New()
+//	h1.Write(key)
+//	d1 := h1.Sum(nil)
+//	h2 := sha1.New()
+//	h2.Write(key)
+//	d2 := h2.Sum(nil)
+//
+//	coords := ""
+//	coordsAsInt := make([]int, dimentions)
+//	for i := 0; i < dimentions; i++ {
+//		x := new(big.Int).SetBytes(d1)
+//		y := new(big.Int).SetBytes(d2)
+//		y.Mul(y, new(big.Int).SetInt64(int64(i+1)))
+//		x.Add(x, y)
+//		x.Mod(x, new(big.Int).SetInt64(int64(dimSize)))
+//		coords += x.Text(10) + VALUE_SEPARATOR
+//		coordsAsInt[i] = int(x.Int64())
+//	}
+//	return coords[:len(coords)-1], coordsAsInt
+//}
+
+// Maps a key to a list of dimentions integers, each in [0,dimSize), as string idx1|...|idxdimentions
 func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
 	h1 := md5.New()
-	h1.Write(key)
-	d1 := h1.Sum(nil)
-	h2 := sha1.New()
-	h2.Write(key)
-	d2 := h2.Sum(nil)
 
 	coords := ""
 	coordsAsInt := make([]int, dimentions)
 	for i := 0; i < dimentions; i++ {
+		h1.Write(key)
+		h1.Write([]byte{byte(i)})
+		d1 := h1.Sum(nil)
 		x := new(big.Int).SetBytes(d1)
-		y := new(big.Int).SetBytes(d2)
-		y.Mul(y, new(big.Int).SetInt64(int64(i+1)))
-		x.Add(x, y)
 		x.Mod(x, new(big.Int).SetInt64(int64(dimSize)))
 		coords += x.Text(10) + VALUE_SEPARATOR
 		coordsAsInt[i] = int(x.Int64())
+		h1.Reset()
 	}
 	return coords[:len(coords)-1], coordsAsInt
 }
