@@ -83,19 +83,21 @@ func Chunkify(b []byte, chunkSize int) ([]uint64, error) {
 	if err != nil {
 		return nil, err
 	}
-	l := strconv.FormatUint(uint64(len(bin)), 2)
-	for len(l) < chunkSize {
-		l = "0" + l
-	}
-	bin += l
+	//l := strconv.FormatUint(uint64(len(bin)), 2)
+	//for len(l) < chunkSize {
+	//	l = "0" + l
+	//}
+	//bin += l
 	binChunks := make([]uint64, len(bin)/chunkSize)
+	ii := 0
 	for i := 0; i < len(bin); i = i + chunkSize {
 		chunk := bin[i : i+chunkSize]
 		n, err := strconv.ParseUint(chunk, 2, chunkSize)
 		if err != nil {
 			return nil, err
 		}
-		binChunks = append(binChunks, n)
+		binChunks[ii] = n
+		ii++
 	}
 	return binChunks, err
 }
@@ -119,13 +121,13 @@ func EncodeChunks(chunks []uint64, box *settings.HeBox) []*bfv.PlaintextMul {
 func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 	bins := make([]string, len(chunks))
 	allZero := true
-	for _, n := range chunks {
+	for i, n := range chunks {
 		if n != 0 {
 			allZero = false
 			b := strconv.FormatUint(n, 2)
-			bins = append(bins, b)
+			bins[i] = b
 		} else {
-			bins = append(bins, "0")
+			bins[i] = "0"
 		}
 
 	}

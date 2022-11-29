@@ -36,7 +36,7 @@ func NewHeBox(PC *PirContext) (*HeBox, error) {
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
 		LogN: PC.N,
 		LogQ: QI[int(math.Pow(2.0, float64(PC.N)))], //this is actually QP from the RNS BFV paper
-		T:    uint64(math.Pow(2-0, 29.0) - 3),       //prime of 28 bits
+		T:    uint64(65537),
 	})
 	if err != nil {
 		return nil, err
