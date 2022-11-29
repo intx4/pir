@@ -20,15 +20,16 @@ Represents a context for the PIR scheme:
 	Kd : dimention size of the hypercube, i.e dth-root of K
 */
 type PirContext struct {
-	DBItems    int
-	DBSize     int
-	Dimentions int
-	N          int
-	T          int
-	TUsable    int
-	MaxBinSize int
-	K          int
-	Kd         int
+	DBItems         int
+	DBSize          int
+	Dimentions      int
+	N               int
+	T               int
+	TUsable         int
+	MaxBinSize      int
+	ExpectedBinSize int
+	K               int
+	Kd              int
 }
 
 var genF = func(c float64) func(x float64) float64 {
@@ -70,7 +71,8 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 				break
 			}
 		}
-		if math.Floor((dc+1)*math.Log(K)) < float64(PC.MaxBinSize) {
+		if math.Floor((dc+1)*math.Log(K)) < float64(PC.MaxBinSize) && dc != 0.0 {
+			PC.ExpectedBinSize = int(math.Floor((dc + 1) * math.Log(K)))
 			PC.K = int(K)
 			PC.Kd = int(base)
 			break
@@ -83,3 +85,5 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 	}
 	return PC, nil
 }
+
+//TO DO FIX fucking D=3 bucket repartition
