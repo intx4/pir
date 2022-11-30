@@ -38,7 +38,7 @@ func TestByteToBits(t *testing.T) {
 	for _, l := range lens {
 		b := RandByteString(l)
 		bin := utils.BytesToBits(b)
-		bnew, err := utils.BitsToBytes(bin)
+		bnew, err := utils.BitsToBytes(bin, uint64(l))
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
@@ -87,6 +87,7 @@ func TestEncodeChunks(t *testing.T) {
 	for _, l := range lens {
 		for _, tb := range ts {
 			b := RandByteString(l)
+			b = append([]byte{0}, b...)
 			chunks, err := utils.Chunkify(b, tb)
 			if err != nil {
 				t.Fatalf(err.Error())

@@ -33,12 +33,14 @@ func BytesToBits(b []byte) string {
 	return n.Text(2)
 }
 
-func BitsToBytes(b string) ([]byte, error) {
+func BitsToBytes(b string, l uint64) ([]byte, error) {
 	n, ok := new(big.Int).SetString(b, 2)
 	if !ok {
 		return nil, errors.New("Failed converting bit string to integer")
 	}
-	return n.Bytes(), nil
+	p := make([]byte, l)
+	n.FillBytes(p)
+	return p, nil
 }
 
 // Add pad to b (binary string) so to make its len multiple of t_bits. Adds trailing 0 to last chunk of t bits, and adds the pad length as a last chunk
@@ -83,11 +85,12 @@ func Chunkify(b []byte, chunkSize int) ([]uint64, error) {
 	if err != nil {
 		return nil, err
 	}
-	//l := strconv.FormatUint(uint64(len(bin)), 2)
-	//for len(l) < chunkSize {
-	//	l = "0" + l
-	//}
-	//bin += l
+	//add length of original byte string after padding
+	l := strconv.FormatUint(uint64(len(b)), 2)
+	for len(l) < chunkSize {
+		l = "0" + l
+	}
+	bin += l
 	binChunks := make([]uint64, len(bin)/chunkSize)
 	ii := 0
 	for i := 0; i < len(bin); i = i + chunkSize {
@@ -156,14 +159,24 @@ func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 	}
 
 	b := ""
-	for _, s := range bins {
-		b += s
+	l := uint64(0)
+	for i := range bins {
+		if i != len(bins)-1 {
+			b += bins[i]
+		} else {
+			//extract len
+			var err error
+			l, err = strconv.ParseUint(bins[i], 2, tBits)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	b, err := UnPad(b, tBits)
 	if err != nil {
 		return nil, err
 	}
-	return BitsToBytes(b)
+	return BitsToBytes(b, l)
 }
 
 // Maps a key to a list of dimentions integers, each in [0,dimSize), as string idx1|...|idxdimentions
