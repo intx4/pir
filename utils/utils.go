@@ -3,7 +3,7 @@ package utils
 import (
 	"crypto/md5"
 	"errors"
-	"github.com/tuneinsight/lattigo/v4/bfv"
+	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"math"
 	"math/big"
 	"pir/settings"
@@ -15,9 +15,9 @@ var VALUE_SEPARATOR string = "|"
 
 func Min(a, b int) int {
 	if a >= b {
-		return a
+		return b
 	}
-	return b
+	return a
 }
 
 // Converts b to binary representation
@@ -87,7 +87,7 @@ func Chunkify(b []byte, chunkSize int) ([]uint64, error) {
 	}
 	//add length of original byte string after padding
 	l := strconv.FormatUint(uint64(len(b)), 2)
-	for len(l) < chunkSize {
+	for len(l)%chunkSize != 0 {
 		l = "0" + l
 	}
 	bin += l
@@ -106,9 +106,9 @@ func Chunkify(b []byte, chunkSize int) ([]uint64, error) {
 }
 
 // Encodes chunks as a list of Plaintexts in NTT form
-func EncodeChunks(chunks []uint64, box *settings.HeBox) []*bfv.PlaintextMul {
+func EncodeChunks(chunks []uint64, box settings.HeBox) []rlwe.Operand {
 	numPts := int(math.Ceil(float64(len(chunks)) / float64(box.Params.N())))
-	pts := make([]*bfv.PlaintextMul, numPts)
+	pts := make([]rlwe.Operand, numPts)
 	pti := 0
 	for i := 0; i < len(chunks); i = i + box.Params.N() {
 		if i+box.Params.N() >= len(chunks) {
@@ -159,48 +159,39 @@ func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 	}
 
 	b := ""
+	//extract length of data
 	l := uint64(0)
-	for i := range bins {
-		if i != len(bins)-1 {
-			b += bins[i]
-		} else {
-			//extract len
-			var err error
-			l, err = strconv.ParseUint(bins[i], 2, tBits)
-			if err != nil {
-				return nil, err
-			}
+	padIdx := 0
+	for i := len(bins) - 1; i >= 0; i-- {
+		//scan backwords, find pad prefix. Everything after is len
+		bin := bins[i]
+		if bin[:len(PAD_PREFIX)] == PAD_PREFIX {
+			padIdx = i
+			break
 		}
 	}
-	b, err := UnPad(b, tBits)
+	lBin := ""
+	for i := padIdx + 1; i < len(bins); i++ {
+		lBin += bins[i]
+	}
+	for lBin[0] == '0' {
+		//rm trailing 0s
+		lBin = lBin[1:]
+	}
+	l, err := strconv.ParseUint(lBin, 2, len(lBin))
+	if err != nil {
+		return nil, err
+	}
+	bins = bins[:padIdx+1]
+	for i := range bins {
+		b += bins[i]
+	}
+	b, err = UnPad(b, tBits)
 	if err != nil {
 		return nil, err
 	}
 	return BitsToBytes(b, l)
 }
-
-// Maps a key to a list of dimentions integers, each in [0,dimSize), as string idx1|...|idxdimentions
-//func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
-//	h1 := md5.New()
-//	h1.Write(key)
-//	d1 := h1.Sum(nil)
-//	h2 := sha1.New()
-//	h2.Write(key)
-//	d2 := h2.Sum(nil)
-//
-//	coords := ""
-//	coordsAsInt := make([]int, dimentions)
-//	for i := 0; i < dimentions; i++ {
-//		x := new(big.Int).SetBytes(d1)
-//		y := new(big.Int).SetBytes(d2)
-//		y.Mul(y, new(big.Int).SetInt64(int64(i+1)))
-//		x.Add(x, y)
-//		x.Mod(x, new(big.Int).SetInt64(int64(dimSize)))
-//		coords += x.Text(10) + VALUE_SEPARATOR
-//		coordsAsInt[i] = int(x.Int64())
-//	}
-//	return coords[:len(coords)-1], coordsAsInt
-//}
 
 // Maps a key to a list of dimentions integers, each in [0,dimSize), as string idx1|...|idxdimentions
 func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {

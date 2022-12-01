@@ -28,10 +28,12 @@ func (PE *PIREntry) Update(newValue []byte, maxBinSize int) (int, error) {
 		return -1, errors.New(fmt.Sprintf("Byte length of data stored in this entry is not uniform. Old %d, new %d", PE.L, len(newValue)))
 	}
 	if PE.Items+1 > maxBinSize {
+		PE.Value = append(PE.Value, []byte("|")...)
 		PE.Value = append(PE.Value, newValue...)
 		PE.Items++
 		return PE.Items - 1, errors.New(fmt.Sprintf("Entry size exceeded maximum bin size: %d > %d", PE.Items+1, maxBinSize))
 	}
+	PE.Value = append(PE.Value, []byte("|")...)
 	PE.Value = append(PE.Value, newValue...)
 	PE.Items++
 	return PE.Items - 1, nil
@@ -62,7 +64,7 @@ func (PE *PIREntry) Delete(pos int) error {
 	return nil
 }
 
-func (PE *PIREntry) Encode(t int, box *settings.HeBox) ([]*bfv.PlaintextMul, error) {
+func (PE *PIREntry) Encode(t int, box settings.HeBox) ([]rlwe.Operand, error) {
 	chunks, err := utils.Chunkify(PE.Value, t)
 	if err != nil {
 		return nil, err
@@ -71,12 +73,12 @@ func (PE *PIREntry) Encode(t int, box *settings.HeBox) ([]*bfv.PlaintextMul, err
 }
 
 type PIRServer struct {
-	Context *settings.PirContext
-	Box     *settings.HeBox
+	Context settings.PirContext
+	Box     settings.HeBox
 	Store   map[string]*PIREntry
 }
 
-func NewPirServer(c *settings.PirContext, b *settings.HeBox, keys [][]byte, values [][]byte) (*PIRServer, error) {
+func NewPirServer(c settings.PirContext, b settings.HeBox, keys [][]byte, values [][]byte) (*PIRServer, error) {
 	PS := new(PIRServer)
 	PS.Context = c
 	PS.Box = b
@@ -106,23 +108,28 @@ func NewPirServer(c *settings.PirContext, b *settings.HeBox, keys [][]byte, valu
 	return PS, nil
 }
 
-func (PS *PIRServer) Encode() (map[string][]*bfv.PlaintextMul, error) {
-	ecdStore := make(map[string][]*bfv.PlaintextMul)
+func (PS *PIRServer) LoadRelinKey(rlk *rlwe.RelinearizationKey) {
+	PS.Box.WithEvaluator(bfv.NewEvaluator(PS.Box.Params, rlwe.EvaluationKey{Rlk: rlk}))
+}
+
+func (PS *PIRServer) Encode() (map[string][]rlwe.Operand, error) {
+	ecdStore := make(map[string][]rlwe.Operand)
 	for k, e := range PS.Store {
 		v, err := e.Encode(PS.Context.TUsable, PS.Box)
 		if err != nil {
 			return nil, err
 		}
+		//cast to operands
 		ecdStore[k] = v
 	}
 	return ecdStore, nil
 }
 
 // Recursive function to generate keys at depth nextdepth = currdepth+1 (depth is a dimention)
-func (PS *PIRServer) genKeysAtDepth(di string, nextDepth int, keys []string) {
+func (PS *PIRServer) genKeysAtDepth(di string, nextDepth int, keys *[]string) {
 	if nextDepth == PS.Context.Dimentions-1 {
 		for dj := 0; dj < PS.Context.Kd; dj++ {
-			keys = append(keys, di+"|"+strconv.FormatInt(int64(dj), 10))
+			*keys = append(*keys, di+"|"+strconv.FormatInt(int64(dj), 10))
 		}
 	} else if nextDepth > PS.Context.Dimentions {
 		return
@@ -146,10 +153,7 @@ Given an encoded PIR database and a query from client, answers the query.
 	the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
 */
 func (PS *PIRServer) AnswerGen(ecdStore map[string][]rlwe.Operand, query [][]*rlwe.Ciphertext, rlk *rlwe.RelinearizationKey) ([]*rlwe.Ciphertext, error) {
-	if PS.Box.Evt == nil {
-		return nil, errors.New("Evaluator not initialized")
-	}
-	evt := PS.Box.Evt.WithKey(rlwe.EvaluationKey{Rlk: rlk})
+	evt := bfv.NewEvaluator(PS.Box.Params, rlwe.EvaluationKey{Rlk: rlk})
 	if PS.Context.Kd != len(query[0]) {
 		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", PS.Context.Kd, len(query[0])))
 	}
@@ -162,24 +166,24 @@ func (PS *PIRServer) AnswerGen(ecdStore map[string][]rlwe.Operand, query [][]*rl
 		q := query[d]
 		newStore := make(map[string][]rlwe.Operand)
 		keys := make([]string, 0)
-		PS.genKeysAtDepth("", d+1, keys)
+		PS.genKeysAtDepth("", d+1, &keys)
 		for di := 0; di < PS.Context.Kd; di++ {
 			//scan this dimention
-			result := make([]*rlwe.Ciphertext, 0)
 			if len(keys) > 0 {
 				//recurring, update storage
 				for _, k := range keys {
-					nextK := k
+					result := make([]*rlwe.Ciphertext, 0)
+					nextK := k[1:] //remove "|"
 					k = strconv.FormatInt(int64(di), 10) + k
 					if e, ok := ecdStore[k]; ok {
 						for _, op := range e {
 							result = append(result, evt.MulNew(q[di], op))
 						}
 					}
-					if e, ok := newStore[k]; ok {
+					if e, ok := newStore[nextK]; ok {
 						//compress (accumulate result with lazy modswitch and relin)
 						if len(result) > 0 {
-							for i := 0; i < len(e); i++ {
+							for i := 0; i < utils.Min(len(result), len(e)); i++ {
 								e[i] = evt.AddNew(result[i], e[i])
 							}
 							if len(result) > len(e) {
@@ -203,6 +207,7 @@ func (PS *PIRServer) AnswerGen(ecdStore map[string][]rlwe.Operand, query [][]*rl
 				}
 			} else {
 				//final dimention
+				result := make([]*rlwe.Ciphertext, 0)
 				if e, ok := ecdStore[strconv.FormatInt(int64(di), 10)]; ok {
 					for _, op := range e {
 						result = append(result, evt.MulNew(q[di], op))
@@ -229,8 +234,11 @@ func (PS *PIRServer) AnswerGen(ecdStore map[string][]rlwe.Operand, query [][]*rl
 		if d != PS.Context.Dimentions-1 {
 			for _, e := range newStore {
 				for _, ct := range e {
-					evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
-					evt.Reduce(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+					if d != 0 {
+						//after first we have done a ct x pt -> deg is still 1
+						evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+					}
+					//evt.Reduce(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 				}
 			}
 			//update storage recursively

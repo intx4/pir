@@ -42,7 +42,7 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 	if Dimentions < 0 || Dimentions > 3 {
 		return nil, errors.New("Hypercube dimention can be 0 to 3")
 	}
-	PC := &PirContext{DBItems: Items, DBSize: Size, Dimentions: Dimentions, N: N, T: T, TUsable: tUsable, MaxBinSize: int(math.Floor(float64(tUsable) * math.Pow(2, float64(N)) / float64(Size)))}
+	PC := &PirContext{DBItems: Items, DBSize: Size, Dimentions: Dimentions, N: N, T: T, TUsable: tUsable, MaxBinSize: int(math.Floor((float64(tUsable) * math.Pow(2, float64(N))) / float64(Size)))}
 
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := 2.0
@@ -85,5 +85,3 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 	}
 	return PC, nil
 }
-
-//TO DO FIX fucking D=3 bucket repartition

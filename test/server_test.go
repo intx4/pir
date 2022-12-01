@@ -35,7 +35,7 @@ func TestServerEncode(t *testing.T) {
 					keys[i] = RandByteString(100)
 					values[i] = RandByteString(size)
 				}
-				server, err := pir.NewPirServer(context, box, keys, values)
+				server, err := pir.NewPirServer(*context, *box, keys, values)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}

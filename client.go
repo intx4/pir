@@ -9,11 +9,11 @@ import (
 )
 
 type PIRClient struct {
-	Box     *settings.HeBox
-	Context *settings.PirContext
+	Box     settings.HeBox
+	Context settings.PirContext
 }
 
-func NewPirClient(c *settings.PirContext, b *settings.HeBox) *PIRClient {
+func NewPirClient(c settings.PirContext, b settings.HeBox) *PIRClient {
 	client := new(PIRClient)
 	client.Context = c
 	client.Box = b
@@ -24,6 +24,10 @@ func NewPirClient(c *settings.PirContext, b *settings.HeBox) *PIRClient {
 	client.Box.WithDecryptor(bfv.NewDecryptor(client.Box.Params, client.Box.Sk))
 	//client.Box.WithEvaluator(bfv.NewEvaluator(b.Params, rlwe.EvaluationKey{client.Box.Kgen.GenRelinearizationKey(client.Box.Sk, 3), nil}))
 	return client
+}
+
+func (PC *PIRClient) GenRelinKey() (*rlwe.RelinearizationKey, error) {
+	return PC.Box.GenRelinKey()
 }
 
 /*
@@ -46,7 +50,7 @@ func (PC *PIRClient) QueryGen(key []byte) ([][]*rlwe.Ciphertext, error) {
 			c := &rlwe.Ciphertext{}
 			if d == k {
 				//enc 1
-				q := make([]int, PC.Box.Params.N())
+				q := make([]uint64, PC.Box.Params.N())
 				for j := 0; j < len(q); j++ {
 					q[j] = 1
 				}

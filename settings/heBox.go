@@ -13,9 +13,9 @@ poly_modulus_degree             | max coeff_modulus bit-length
 var QI = map[int][]int{
 	2048:  []int{54},
 	4096:  []int{54, 54},
-	8192:  []int{60, 60, 60},
-	16384: []int{60, 60, 60},
-	32768: []int{60, 60, 60},
+	8192:  []int{60, 60, 60, 38},
+	16384: []int{60, 60, 60, 60, 60, 60, 60},
+	32768: []int{60, 60, 60, 60, 60, 60, 60},
 }
 
 // Wraps all the struct necessary for BFV
