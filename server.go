@@ -275,7 +275,7 @@ func (PS *PIRServer) AnswerGen(ecdStore map[string][]rlwe.Operand, query [][]*rl
 						//after first we have done a ct x pt -> deg is still 1
 						evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 					}
-					//evt.Reduce(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+					evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 				}
 			}
 			//update storage recursively
@@ -283,6 +283,7 @@ func (PS *PIRServer) AnswerGen(ecdStore map[string][]rlwe.Operand, query [][]*rl
 		} else {
 			for _, ct := range finalAnswer {
 				evt.Relinearize(ct, ct)
+				evt.Rescale(ct, ct)
 			}
 		}
 	}
