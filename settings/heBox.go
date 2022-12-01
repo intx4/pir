@@ -10,12 +10,17 @@ import (
 poly_modulus_degree             | max coeff_modulus bit-length
 1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
 */
-var QI = map[int][]int{
-	2048:  []int{54},
-	4096:  []int{54, 54},
-	8192:  []int{60, 60, 60, 38},
-	16384: []int{60, 60, 60, 60, 60, 60, 60},
-	32768: []int{60, 60, 60, 60, 60, 60, 60},
+var QI = map[int]map[int][]int{
+	2: {
+		2048:  []int{54},
+		4096:  []int{54, 54},
+		8192:  []int{30, 30, 30}, // 60, 60, 38},
+		16384: []int{30, 30, 30}, // 60, 60, 60, 60, 60, 60},
+	},
+	3: {
+		8192:  []int{30, 30, 30, 30}, // 60, 60, 38},
+		16384: []int{30, 30, 30, 30}, // 60, 60, 60, 60, 60, 60},
+	},
 }
 
 // Wraps all the struct necessary for BFV
@@ -34,7 +39,7 @@ func NewHeBox(PC *PirContext) (*HeBox, error) {
 	//to do: add checks at some point to make sure that depth is aligned with levels
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
 		LogN: PC.N,
-		LogQ: QI[1<<PC.N], //this is actually QP from the RNS BFV paper
+		LogQ: QI[PC.Dimentions][1<<PC.N], //this is actually QP from the RNS BFV paper
 		T:    uint64(65537),
 	})
 	if err != nil {

@@ -41,8 +41,9 @@ class Group:
         self.typ = typ
         for record in records:
             self.records[record.label] = record.deepcopy()
-def read_csv(path : str):
+def read_csv(path : str,d=2):
     df = pd.read_csv(path)
+    df = df[df['d'] == d]
     db_sizes = df['entries'].unique()
     record_sizes = df['size'].unique()
     records_by_entries = []
@@ -72,27 +73,28 @@ def read_csv(path : str):
 
 
 if __name__ == "__main__":
-    groups = read_csv("pir.csv")
+    for d in [2,3]:
+        groups = read_csv("pirGo.csv", d)
 
-    for group in groups:
-        fig, axs = plt.subplots(3)
-        for i, metric in enumerate(["Time(s)", "Memory(GB)", "Network(MB)"]):
-            labels = []
-            typ = ""
-            if group.typ == "by entries":
-                typ = "Record size(B)"
-            else:
-                typ = "Entries in DB (log2)"
+        for group in groups:
+            fig, axs = plt.subplots(3)
+            for i, metric in enumerate(["Time(s)", "Memory(GB)", "Network(MB)"]):
+                labels = []
+                typ = ""
+                if group.typ == "by entries":
+                    typ = "Record size(B)"
+                else:
+                    typ = "Entries in DB (log2)"
 
-            for label, record in group.records.items():
-                axs[i].plot(record.x, record.metrics[metric])
-                labels.append(label)
-            axs[i].legend(labels)
+                for label, record in group.records.items():
+                    axs[i].plot(record.x, record.metrics[metric])
+                    labels.append(label)
+                axs[i].legend(labels)
 
-            axs[i].xaxis.set_label_text(typ)
-            axs[i].yaxis.set_label_text(metric)
-        fig.suptitle(group.typ)
-        plt.savefig(f"{group.typ}.png", format="png")
+                axs[i].xaxis.set_label_text(typ)
+                axs[i].yaxis.set_label_text(metric)
+            fig.suptitle(group.typ)
+            plt.savefig(f"{group.typ}_dim{d}.png", format="png")
 
 
 

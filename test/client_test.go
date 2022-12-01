@@ -25,7 +25,7 @@ func TestClientQueryGen(t *testing.T) {
 	for _, item := range items {
 		for _, size := range sizes {
 			for _, dimentions := range []int{2, 3} {
-				context, err := settings.NewPirContext(item, size, dimentions, 14, 65537, 16)
+				context, err := settings.NewPirContext(item, size, dimentions, 13, 65537, 16)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
@@ -74,7 +74,7 @@ func TestClientQueryGen(t *testing.T) {
 
 func TestClientRetrieval(t *testing.T) {
 	//DB dimentions
-	listOfEntries := []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
+	listOfEntries := []int{1 << 16, 1 << 18, 1 << 20}
 	sizes := []int{150 * 8, 250 * 8}
 
 	os.Remove("data/pirGo.csv")
@@ -93,7 +93,7 @@ func TestClientRetrieval(t *testing.T) {
 		for _, size := range sizes {
 			for _, dimentions := range []int{2, 3} {
 				//first we create a context for the PIR
-				context, err := settings.NewPirContext(entries, size, dimentions, 14, 65537, 16)
+				context, err := settings.NewPirContext(entries, size, dimentions, 13, 65537, 16)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}

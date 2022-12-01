@@ -8,7 +8,9 @@ import (
 	"log"
 	"pir/settings"
 	"pir/utils"
+	"runtime"
 	"strconv"
+	"sync"
 )
 
 /*
@@ -152,30 +154,49 @@ func (PS *PIRServer) LoadRelinKey(rlk *rlwe.RelinearizationKey) {
 
 func (PS *PIRServer) Encode() (map[string][]rlwe.Operand, error) {
 	ecdStore := make(map[string][]rlwe.Operand)
-	for k, e := range PS.Store {
-		v, err := e.Encode(PS.Context.TUsable, PS.Box)
-		if err != nil {
-			return nil, err
-		}
-		//cast to operands
-		ecdStore[k] = v
+	pool := runtime.NumCPU()
+	poolCh := make(chan struct{}, pool)
+	errCh := make(chan error)
+	//init pool chan
+	for i := 0; i < pool; i++ {
+		poolCh <- struct{}{}
 	}
-	return ecdStore, nil
+	for k, e := range PS.Store {
+		<-poolCh //if no routines this is blocking
+		go func(k string, e *PIREntry) {
+			v, err := e.Encode(PS.Context.TUsable, PS.Box)
+			if err != nil {
+				errCh <- err
+			}
+			//cast to operands
+			ecdStore[k] = v
+			poolCh <- struct{}{} //restore 1 routine
+		}(k, e)
+	}
+	select {
+	case err := <-errCh:
+		return nil, err
+	default:
+		//empty means no err
+		return ecdStore, nil
+	}
 }
 
 // Recursive function to generate keys at depth nextdepth = currdepth+1 (depth is a dimention)
 func (PS *PIRServer) genKeysAtDepth(di string, nextDepth int, keys *[]string) {
-	if nextDepth == PS.Context.Dimentions-1 {
-		for dj := 0; dj < PS.Context.Kd; dj++ {
-			*keys = append(*keys, di+"|"+strconv.FormatInt(int64(dj), 10))
-		}
-	} else if nextDepth > PS.Context.Dimentions {
-		return
+	if nextDepth > PS.Context.Dimentions {
+		*keys = append(*keys, di)
 	} else {
 		for dj := 0; dj < PS.Context.Kd; dj++ {
 			PS.genKeysAtDepth(di+"|"+strconv.FormatInt(int64(dj), 10), nextDepth+1, keys)
 		}
 	}
+}
+
+type MultiplierTask struct {
+	Query  *rlwe.Ciphertext
+	Values []rlwe.Operand
+	Result []rlwe.Operand
 }
 
 /*
@@ -198,95 +219,116 @@ func (PS *PIRServer) AnswerGen(ecdStore map[string][]rlwe.Operand, query [][]*rl
 	if PS.Context.Dimentions != len(query) {
 		return nil, errors.New(fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", PS.Context.Dimentions, len(query)))
 	}
+
+	//spawnMultipliers
+	feedBackCh := make(chan int)
+	taskCh := make(chan MultiplierTask, runtime.NumCPU())
+	var wg sync.WaitGroup
+	for i := 0; i < runtime.NumCPU(); i++ {
+		wg.Add(1)
+		go func() {
+			SpawnMultiplier(evt.ShallowCopy(), taskCh, feedBackCh)
+			defer wg.Done()
+		}()
+	}
+
 	finalAnswer := make([]*rlwe.Ciphertext, 0)
 	for d := 0; d < PS.Context.Dimentions; d++ {
 		//loop over all dimentions of the hypercube
 		q := query[d]
 		newStore := make(map[string][]rlwe.Operand)
-		keys := make([]string, 0)
+		keys := make([]string, 0) //builds access to storage in a recursive way
+		numEffectiveKeys := 0     //keeps track of how many entries are effectively in storage at a given dim
+		numComputedKeys := 0      //keeps track of how many query x entry results have been computed in storage at a given dim
+		finalRound := d == PS.Context.Dimentions-1
+
 		PS.genKeysAtDepth("", d+1, &keys)
+
 		for di := 0; di < PS.Context.Kd; di++ {
 			//scan this dimention
-			if len(keys) > 0 {
-				//recurring, update storage
-				for _, k := range keys {
-					result := make([]*rlwe.Ciphertext, 0)
-					nextK := k[1:] //remove "|"
-					k = strconv.FormatInt(int64(di), 10) + k
-					if e, ok := ecdStore[k]; ok {
-						for _, op := range e {
-							result = append(result, evt.MulNew(q[di], op))
-						}
-					}
-					if e, ok := newStore[nextK]; ok {
-						//compress (accumulate result with lazy modswitch and relin)
-						if len(result) > 0 {
-							for i := 0; i < utils.Min(len(result), len(e)); i++ {
-								e[i] = evt.AddNew(result[i], e[i])
-							}
-							if len(result) > len(e) {
-								//this result is longer then the one we had, add the additional ciphertexts
-								newItemsIdx := len(e)
-								for len(e) < len(result) {
-									e = append(e, result[newItemsIdx])
-									newItemsIdx++
-								}
-							}
-						}
-					} else {
-						//store new intermediate result
-						if len(result) > 0 {
-							newStore[nextK] = make([]rlwe.Operand, len(result))
-							for i, ct := range result {
-								newStore[nextK][i] = ct
-							}
-						}
+			for _, k := range keys {
+				nextK := k[1:] //remove "|"
+				k = strconv.FormatInt(int64(di), 10) + k
+				if _, ok := newStore[nextK]; !ok {
+					//create new entry if missing
+					newStore[nextK] = make([]rlwe.Operand, 0)
+				}
+				//feed multipliers
+				if e, ok := ecdStore[k]; ok {
+					numEffectiveKeys++
+					taskCh <- MultiplierTask{
+						Query:  q[di],
+						Values: e,
+						Result: newStore[nextK],
 					}
 				}
-			} else {
-				//final dimention
-				result := make([]*rlwe.Ciphertext, 0)
-				if e, ok := ecdStore[strconv.FormatInt(int64(di), 10)]; ok {
-					for _, op := range e {
-						result = append(result, evt.MulNew(q[di], op))
+			}
+			if finalRound {
+				newStore[""] = make([]rlwe.Operand, 0)
+				k := strconv.FormatInt(int64(di), 10)
+				if e, ok := ecdStore[k]; ok {
+					numEffectiveKeys++
+					taskCh <- MultiplierTask{
+						Query:  q[di],
+						Values: e,
+						Result: newStore[""],
 					}
 				}
-				if len(finalAnswer) == 0 {
-					finalAnswer = result
-				} else if len(result) > 0 {
-					for i := 0; i < len(finalAnswer); i++ {
-						evt.Add(result[i], finalAnswer[i], finalAnswer[i])
-					}
-					if len(result) > len(finalAnswer) {
-						//this result is longer then the one we had, add the additional ciphertexts
-						newItemsIdx := len(finalAnswer)
-						for len(finalAnswer) < len(result) {
-							finalAnswer = append(finalAnswer, result[newItemsIdx])
-							newItemsIdx++
-						}
-					}
-				}
+			}
+			//wait for the routines to compute the keys for this dimention
+			for numComputedKeys < numEffectiveKeys {
+				numComputedKeys += <-feedBackCh
 			}
 		}
 		//relin and modswitch
-		if d != PS.Context.Dimentions-1 {
-			for _, e := range newStore {
-				for _, ct := range e {
-					if d != 0 {
-						//after first we have done a ct x pt -> deg is still 1
-						evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
-					}
-					evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+
+		for k, e := range newStore {
+			for i, ct := range e {
+				if d != 0 {
+					//after first we have done a ct x pt -> deg is still 1
+					evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+				}
+				evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+				if finalRound && k == "" {
+					finalAnswer[i] = ct.(*rlwe.Ciphertext)
 				}
 			}
-			//update storage recursively
+		}
+		//update storage recursively
+		if !finalRound {
 			ecdStore = newStore
-		} else {
-			for _, ct := range finalAnswer {
-				evt.Relinearize(ct, ct)
-				evt.Rescale(ct, ct)
-			}
 		}
 	}
+	close(taskCh)
+	wg.Wait()
 	return finalAnswer, nil
+}
+
+// Performs the multiplication between a query vector and a value in the storage, then saves it in result.
+// It receives task via the taskCh
+func SpawnMultiplier(evt bfv.Evaluator, taskCh chan MultiplierTask, feedBackCh chan int) {
+	for {
+		task, ok := <-taskCh
+		if !ok {
+			//closed
+			return
+		}
+		intermediateResult := make([]*rlwe.Ciphertext, 0)
+		for _, op := range task.Values {
+			intermediateResult = append(intermediateResult, evt.MulNew(task.Query, op))
+		}
+		//compress (accumulate result with lazy modswitch and relin)
+		for i := 0; i < utils.Min(len(intermediateResult), len(task.Result)); i++ {
+			evt.Add(task.Result[i].(*rlwe.Ciphertext), intermediateResult[i], task.Result[i].(*rlwe.Ciphertext))
+		}
+		if len(intermediateResult) > len(task.Result) {
+			//this result is longer then the one we had, add the additional ciphertexts
+			newItemsIdx := len(task.Result)
+			for len(task.Result) < len(intermediateResult) {
+				task.Result = append(task.Result, intermediateResult[newItemsIdx])
+				newItemsIdx++
+			}
+		}
+		feedBackCh <- 1
+	}
 }

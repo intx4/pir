@@ -76,8 +76,8 @@ func TestEncodeChunks(t *testing.T) {
 
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
 		LogN: 12,
-		LogQ: settings.QI[8192], //this is actually QP from the RNS BFV paper
-		T:    uint64(65537),     //Fermat prime
+		LogQ: settings.QI[2][8192], //this is actually QP from the RNS BFV paper
+		T:    uint64(65537),        //Fermat prime
 	})
 	if err != nil {
 		t.Fatalf(err.Error())
