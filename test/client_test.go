@@ -129,7 +129,7 @@ func TestClientRetrieval(t *testing.T) {
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
-				if bytes.Compare(server.Store[choosenKey].Value, answerPt) != 0 {
+				if bytes.Compare(server.Store[choosenKey].Coalesce(), answerPt) != 0 {
 					fmt.Println("Want")
 					fmt.Println(server.Store[choosenKey].Value)
 					fmt.Println("Got")

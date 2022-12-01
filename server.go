@@ -15,12 +15,12 @@ Record of the PIR Database in bytes. It contains a value (that is a sequence of 
 */
 type PIREntry struct {
 	Items int
-	Value []byte
+	Value [][]byte
 	L     int
 }
 
 func NewPirEntry(value []byte) *PIREntry {
-	return &PIREntry{Items: 1, Value: value, L: len(value)}
+	return &PIREntry{Items: 1, Value: [][]byte{value}, L: len(value)}
 }
 
 func (PE *PIREntry) Update(newValue []byte, maxBinSize int) (int, error) {
@@ -28,27 +28,23 @@ func (PE *PIREntry) Update(newValue []byte, maxBinSize int) (int, error) {
 		return -1, errors.New(fmt.Sprintf("Byte length of data stored in this entry is not uniform. Old %d, new %d", PE.L, len(newValue)))
 	}
 	if PE.Items+1 > maxBinSize {
-		PE.Value = append(PE.Value, []byte("|")...)
-		PE.Value = append(PE.Value, newValue...)
+		PE.Value = append(PE.Value, newValue)
 		PE.Items++
-		return PE.Items - 1, errors.New(fmt.Sprintf("Entry size exceeded maximum bin size: %d > %d", PE.Items+1, maxBinSize))
+		return len(PE.Value) - 1, errors.New(fmt.Sprintf("Entry size exceeded maximum bin size: %d > %d", PE.Items, maxBinSize))
 	}
-	PE.Value = append(PE.Value, []byte("|")...)
-	PE.Value = append(PE.Value, newValue...)
+	PE.Value = append(PE.Value, newValue)
 	PE.Items++
-	return PE.Items - 1, nil
+	return len(PE.Value) - 1, nil
 }
 
 func (PE *PIREntry) Modify(newValue []byte, pos int) error {
 	if len(newValue) != PE.L {
 		return errors.New(fmt.Sprintf("Byte length of data stored in this entry is not uniform. Old %d, new %d", PE.L, len(newValue)))
 	}
-	if pos > PE.Items || pos < 0 {
+	if pos > len(PE.Value) || pos < 0 {
 		return errors.New(fmt.Sprintf("Invalid position for update: %d/%d", pos, PE.Items))
 	}
-	for i := pos; i < pos+PE.L; i++ {
-		PE.Value[i] = newValue[i-pos]
-	}
+	PE.Value[pos] = newValue
 	return nil
 }
 
@@ -56,16 +52,29 @@ func (PE *PIREntry) Delete(pos int) error {
 	if pos > PE.Items || pos < 0 {
 		return errors.New(fmt.Sprintf("Invalid position for update: %d/%d", pos, PE.Items))
 	}
-	for i := pos; i < pos+PE.L; i++ {
-		PE.Value[i] = PE.Value[i+PE.L]
-	}
-	PE.Value = PE.Value[:len(PE.Value)-PE.L]
+	PE.Value = append(PE.Value[:pos], PE.Value[pos+1:]...)
 	PE.Items--
 	return nil
 }
 
+func (PE *PIREntry) Coalesce() []byte {
+	v := make([]byte, PE.Items*PE.L+PE.Items-1)
+	i := 0
+	for _, b := range PE.Value {
+		for _, byt := range b {
+			v[i] = byt
+			i++
+		}
+		if i < len(v) {
+			v[i] = []byte("|")[0]
+			i++
+		}
+	}
+	return v
+}
+
 func (PE *PIREntry) Encode(t int, box settings.HeBox) ([]rlwe.Operand, error) {
-	chunks, err := utils.Chunkify(PE.Value, t)
+	chunks, err := utils.Chunkify(PE.Coalesce(), t)
 	if err != nil {
 		return nil, err
 	}
@@ -106,6 +115,34 @@ func NewPirServer(c settings.PirContext, b settings.HeBox, keys [][]byte, values
 	}
 	fmt.Printf("	Storage encoded in chunks : Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n", maxCollisions, PS.Context.ExpectedBinSize, PS.Context.MaxBinSize)
 	return PS, nil
+}
+
+func (PS *PIRServer) Add(key []byte, value []byte) (int, error) {
+	k, _ := utils.MapKeyToIdx(key, PS.Context.Kd, PS.Context.Dimentions)
+	if e, ok := PS.Store[k]; ok {
+		return e.Update(value, PS.Context.MaxBinSize)
+	} else {
+		PS.Store[k] = NewPirEntry(value)
+		return 1, nil
+	}
+}
+
+func (PS *PIRServer) Modify(key []byte, value []byte, pos int) error {
+	k, _ := utils.MapKeyToIdx(key, PS.Context.Kd, PS.Context.Dimentions)
+	if e, ok := PS.Store[k]; ok {
+		return e.Modify(value, pos)
+	} else {
+		return errors.New("This key is new!")
+	}
+}
+
+func (PS *PIRServer) Delete(key []byte, pos int) error {
+	k, _ := utils.MapKeyToIdx(key, PS.Context.Kd, PS.Context.Dimentions)
+	if e, ok := PS.Store[k]; ok {
+		return e.Delete(pos)
+	} else {
+		return errors.New("This key is new!")
+	}
 }
 
 func (PS *PIRServer) LoadRelinKey(rlk *rlwe.RelinearizationKey) {
