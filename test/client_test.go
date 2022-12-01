@@ -2,15 +2,21 @@ package test
 
 import (
 	"bytes"
+	"encoding/csv"
 	"fmt"
+	"github.com/tuneinsight/lattigo/v4/bfv"
+	"log"
 	"math/rand"
+	"os"
 	"pir"
 	"pir/settings"
 	"pir/utils"
+	"strings"
 	"testing"
+	"time"
 )
 
-var DEBUG = true
+var DEBUG = false
 
 func TestClientQueryGen(t *testing.T) {
 	items := []int{1 << 10, 1 << 12, 1 << 14, 1 << 16}
@@ -68,14 +74,26 @@ func TestClientQueryGen(t *testing.T) {
 
 func TestClientRetrieval(t *testing.T) {
 	//DB dimentions
-	items := []int{1 << 10, 1 << 12, 1 << 14, 1 << 16}
+	listOfEntries := []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
 	sizes := []int{150 * 8, 250 * 8}
 
-	for _, item := range items {
+	os.Remove("data/pirGo.csv")
+	csvFile, err := os.Create("data/pirGo.csv")
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	csvW := csv.NewWriter(csvFile)
+
+	defer csvFile.Close()
+
+	headers := []string{"entries", "size", "d", "ecd_time", "ecd_size", "query_gen_time", "answer_gen_time", "answer_get_time", "tot_time", "query_size", "answer_size"}
+	csvW.Write(headers)
+
+	for _, entries := range listOfEntries {
 		for _, size := range sizes {
 			for _, dimentions := range []int{2, 3} {
 				//first we create a context for the PIR
-				context, err := settings.NewPirContext(item, size, dimentions, 14, 65537, 14)
+				context, err := settings.NewPirContext(entries, size, dimentions, 14, 65537, 16)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
@@ -90,8 +108,8 @@ func TestClientRetrieval(t *testing.T) {
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
-				keys := make([][]byte, item)
-				values := make([][]byte, item)
+				keys := make([][]byte, entries)
+				values := make([][]byte, entries)
 
 				//generate a random db
 				for i := range keys {
@@ -107,12 +125,19 @@ func TestClientRetrieval(t *testing.T) {
 				//pick a key, and create its label. With that, create the query
 				choice := rand.Int() % len(keys)
 				choosenKey, _ := utils.MapKeyToIdx(keys[choice], context.Kd, context.Dimentions)
+
+				start := time.Now()
 				query, err := client.QueryGen(keys[choice])
+				queryGenTime := time.Since(start).Seconds()
+
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
 				//server encodes its storage into plaintexts
+				start = time.Now()
 				ecdStorage, err := server.Encode()
+				ecdTime := time.Since(start).Seconds()
+
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
@@ -120,12 +145,18 @@ func TestClientRetrieval(t *testing.T) {
 				if DEBUG {
 					server.Box.Dec = client.Box.Dec
 				}
+				start = time.Now()
 				answerEnc, err := server.AnswerGen(ecdStorage, query, rlk)
+				answerGenTime := time.Since(start).Seconds()
+
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
 				//extract the answer
+				start = time.Now()
 				answerPt, err := client.AnswerGet(answerEnc)
+				answerGetTime := time.Since(start).Seconds()
+
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
@@ -136,6 +167,44 @@ func TestClientRetrieval(t *testing.T) {
 					fmt.Println(answerPt)
 					t.Fatalf("Answer does not match expected")
 				}
+				querySize := 0
+				for _, q := range query {
+					serialized, err := q[0].MarshalBinary()
+					querySize += len(serialized) * len(q)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+				}
+				answerSize := 0
+				for _, a := range answerEnc {
+					serialized, err := a.MarshalBinary()
+					answerSize += len(serialized)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+				}
+				ecdSize := 0
+				for _, e := range ecdStorage {
+					for _, pt := range e {
+						serialized, err := pt.(*bfv.PlaintextMul).MarshalBinary()
+						ecdSize += len(serialized)
+						if err != nil {
+							t.Fatalf(err.Error())
+						}
+					}
+				}
+				records := fmt.Sprintf("%d, %d, %d, %f, %d, %f, %f, %f, %f, %d, %d", entries, size/8, dimentions, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
+				err = csvW.Write(strings.Split(records, ","))
+				if err != nil {
+					t.Logf(err.Error())
+				}
+				csvW.Flush()
+				err = csvW.Error()
+				if err != nil {
+					t.Logf(err.Error())
+				}
+				records = fmt.Sprintf("Entries : %d, Size : %d, Dimentions : %d, Ecd Time : %f, Ecd Size : %d, Query Gen Time : %f, Answer Gen Time : %f, Answer Get Time : %f, Tot Time : %f, Query Size : %d, Answer Size : %d", entries, size/8, dimentions, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
+				log.Println(records)
 			}
 		}
 	}

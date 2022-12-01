@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
+	"log"
 	"pir/settings"
 	"pir/utils"
 	"strconv"
@@ -113,7 +114,7 @@ func NewPirServer(c settings.PirContext, b settings.HeBox, keys [][]byte, values
 			PS.Store[k] = NewPirEntry(values[i])
 		}
 	}
-	fmt.Printf("	Storage encoded in chunks : Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n", maxCollisions, PS.Context.ExpectedBinSize, PS.Context.MaxBinSize)
+	log.Printf("	Storage encoded in chunks : Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n", maxCollisions, PS.Context.ExpectedBinSize, PS.Context.MaxBinSize)
 	return PS, nil
 }
 
