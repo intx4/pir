@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
+	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"log"
 	"math/rand"
 	"os"
@@ -137,6 +138,25 @@ func TestClientRetrieval(t *testing.T) {
 				start = time.Now()
 				ecdStorage, err := server.Encode()
 				ecdTime := time.Since(start).Seconds()
+				ecdSize := 0
+				ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
+				ecdStorage.Range(func(key, value any) bool {
+					valueToStore := make([]*bfv.PlaintextMul, len(value.([]rlwe.Operand)))
+					for i, v := range value.([]rlwe.Operand) {
+						valueToStore[i] = v.(*bfv.PlaintextMul)
+					}
+					ecdStorageAsMap[key.(string)] = valueToStore
+					return true
+				})
+				for _, e := range ecdStorageAsMap {
+					for _, pt := range e {
+						serialized, err := pt.MarshalBinary()
+						ecdSize += len(serialized)
+						if err != nil {
+							t.Fatalf(err.Error())
+						}
+					}
+				}
 
 				if err != nil {
 					t.Fatalf(err.Error())
@@ -183,16 +203,7 @@ func TestClientRetrieval(t *testing.T) {
 						t.Fatalf(err.Error())
 					}
 				}
-				ecdSize := 0
-				for _, e := range ecdStorage {
-					for _, pt := range e {
-						serialized, err := pt.(*bfv.PlaintextMul).MarshalBinary()
-						ecdSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-				}
+
 				records := fmt.Sprintf("%d, %d, %d, %f, %d, %f, %f, %f, %f, %d, %d", entries, size/8, dimentions, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
 				err = csvW.Write(strings.Split(records, ","))
 				if err != nil {

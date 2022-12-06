@@ -2,6 +2,8 @@ package test
 
 import (
 	"bytes"
+	"github.com/tuneinsight/lattigo/v4/bfv"
+	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"pir"
 	"pir/settings"
 	"pir/utils"
@@ -11,7 +13,7 @@ import (
 // This test takes time
 func TestServerEncode(t *testing.T) {
 	//various settings for the db size
-	items := []int{1 << 10, 1 << 12, 1 << 14, 1 << 16}
+	items := []int{1 << 10, 1 << 12}
 	sizes := []int{150 * 8, 250 * 8}
 
 	for _, item := range items {
@@ -44,7 +46,16 @@ func TestServerEncode(t *testing.T) {
 				if ecdStore, err := server.Encode(); err != nil {
 					t.Fatalf(err.Error())
 				} else {
-					for k, v := range ecdStore {
+					ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
+					ecdStore.Range(func(key, value any) bool {
+						valueToStore := make([]*bfv.PlaintextMul, len(value.([]rlwe.Operand)))
+						for i, v := range value.([]rlwe.Operand) {
+							valueToStore[i] = v.(*bfv.PlaintextMul)
+						}
+						ecdStorageAsMap[key.(string)] = valueToStore
+						return true
+					})
+					for k, v := range ecdStorageAsMap {
 						expected := server.Store[k].Coalesce()
 						actual := box.Ecd.DecodeUintNew(v[0])
 						for i := 1; i < len(v); i++ {
