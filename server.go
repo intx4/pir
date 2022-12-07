@@ -330,6 +330,7 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, query [][]*rlwe.Ciphertext, rlk
 				}
 				evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 				if finalRound && key == "" {
+					//evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 					finalAnswer = append(finalAnswer, ct.(*rlwe.Ciphertext))
 				}
 			}

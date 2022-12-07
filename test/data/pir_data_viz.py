@@ -41,9 +41,11 @@ class Group:
         self.typ = typ
         for record in records:
             self.records[record.label] = record.deepcopy()
-def read_csv(path : str,d=2):
+
+def read_csv(path : str,d=2, n = 8192):
     df = pd.read_csv(path)
     df = df[df['d'] == d]
+    df = df[df['n'] == n]
     db_sizes = df['entries'].unique()
     record_sizes = df['size'].unique()
     records_by_entries = []
@@ -73,28 +75,35 @@ def read_csv(path : str,d=2):
 
 
 if __name__ == "__main__":
+
     for d in [2,3]:
-        groups = read_csv("pirGo.csv", d)
+        for n in [12,13,14]:
+            if d == 3 and n == 4096:
+                continue
 
-        for group in groups:
-            fig, axs = plt.subplots(3)
-            for i, metric in enumerate(["Time(s)", "Memory(GB)", "Network(MB)"]):
-                labels = []
-                typ = ""
-                if group.typ == "by entries":
-                    typ = "Record size(B)"
-                else:
-                    typ = "Entries in DB (log2)"
+            groups = read_csv("pirGo.csv", d, n)
 
-                for label, record in group.records.items():
-                    axs[i].plot(record.x, record.metrics[metric])
-                    labels.append(label)
-                axs[i].legend(labels)
+            for group in groups:
+                fig, axs = plt.subplots(3)
+                for i, metric in enumerate(["Time(s)", "Memory(GB)", "Network(MB)"]):
+                    labels = []
+                    typ = ""
+                    if "(B)" in group.typ:
+                        #x axis has the entries in db, function is determined by record size
+                        typ = "Entries in DB (log2)"
+                    else:
+                        #x axis has the record size in B, function is determined by num of entries
+                        typ = "Record size(B)"
 
-                axs[i].xaxis.set_label_text(typ)
-                axs[i].yaxis.set_label_text(metric)
-            fig.suptitle(group.typ)
-            plt.savefig(f"{group.typ}_dim{d}.png", format="png")
+                    for label, record in group.records.items():
+                        axs[i].plot(record.x, record.metrics[metric])
+                        labels.append(label)
+                    axs[i].legend(labels)
+
+                    axs[i].xaxis.set_label_text(typ)
+                    axs[i].yaxis.set_label_text(metric)
+                fig.suptitle(group.typ)
+                plt.savefig(f"{group.typ}_dim{d}_n{n}.png", format="png")
 
 
 
