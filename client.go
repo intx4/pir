@@ -54,10 +54,10 @@ func (PC *PIRClient) QueryGen(key []byte) ([][]*rlwe.Ciphertext, error) {
 				for j := 0; j < len(q); j++ {
 					q[j] = 1
 				}
-				c = PC.Box.Enc.EncryptNew(PC.Box.Ecd.EncodeNew(q, PC.Box.Params.MaxLevel()-i)) //-i
+				c = PC.Box.Enc.EncryptNew(PC.Box.Ecd.EncodeNew(q, PC.Box.Params.MaxLevel())) //-i
 			} else {
 				//enc 0
-				c = PC.Box.Enc.EncryptZeroNew(PC.Box.Params.MaxLevel() - i)
+				c = PC.Box.Enc.EncryptZeroNew(PC.Box.Params.MaxLevel())
 			}
 			queryOfDim[d] = c
 		}

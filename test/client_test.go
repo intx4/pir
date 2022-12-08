@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var DEBUG = false
+var DEBUG = true
 
 func TestClientQueryGen(t *testing.T) {
 	items := []int{1 << 10, 1 << 12, 1 << 14, 1 << 16}
@@ -74,6 +74,84 @@ func TestClientQueryGen(t *testing.T) {
 	}
 }
 
+func TestCircuitWithLateModSwitch(t *testing.T) {
+	params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
+		LogN:     12,
+		LogQ:     settings.QI[2][1<<12],
+		LogP:     nil,
+		Pow2Base: 0,
+		Sigma:    0,
+		H:        0,
+		T:        uint64(65537),
+	})
+	box := settings.HeBox{
+		Params: params,
+		Sk:     nil,
+		Pk:     nil,
+		Kgen:   bfv.NewKeyGenerator(params),
+		Ecd:    bfv.NewEncoder(params),
+		Enc:    nil,
+		Dec:    nil,
+		Evt:    nil,
+	}
+	sk, pk := box.Kgen.GenKeyPair()
+	box.Sk = sk
+	box.Pk = pk
+	rlk, _ := box.GenRelinKey()
+	box.Evt = bfv.NewEvaluator(params, rlwe.EvaluationKey{Rlk: rlk})
+	box.Enc = bfv.NewEncryptor(params, pk)
+	box.Dec = bfv.NewDecryptor(params, sk)
+
+	selector := make([]uint64, params.N())
+	for i := range selector {
+		selector[i] = 1
+	}
+	selectorEnc := box.Enc.EncryptNew(box.Ecd.EncodeNew(selector, params.MaxLevel())) //budget = log(q) - log(t) = 43
+
+	data := make([]uint64, params.N())
+	for i := range data {
+		data[i] = uint64(i) + 1
+	}
+	dataEcd := box.Ecd.EncodeMulNew(data, params.MaxLevel())
+	selected1 := box.Evt.MulNew(selectorEnc, dataEcd) //budget = 43 - log(t/2) = 27
+
+	fmt.Println("First mul")
+	value := selected1.GetScale().Value
+	fmt.Println(value.String())
+	dec := box.Ecd.DecodeUintNew(box.Dec.DecryptNew(selected1))
+	fmt.Println(dec)
+
+	//accumulator
+	//budget = 27 - log(sums) = 19
+	for i := 0; i < 256; i++ {
+		r := box.Enc.EncryptZeroNew(params.MaxLevel())
+		box.Evt.Add(selected1, r, selected1)
+	}
+	fmt.Println("First accumul")
+	dec = box.Ecd.DecodeUintNew(box.Dec.DecryptNew(selected1))
+	fmt.Println(dec)
+
+	selected2 := box.Evt.MulNew(selectorEnc, selected1) //budget = 19 - log(2tNN) = 19 - (1 + 17 + 24)
+
+	fmt.Println("Second mul")
+	dec = box.Ecd.DecodeUintNew(box.Dec.DecryptNew(selected2))
+	fmt.Println(dec)
+	//accumulator
+	for i := 0; i < 256; i++ {
+		r := box.Enc.EncryptZeroNew(params.MaxLevel())
+		box.Evt.Add(selected2, r, selected2)
+	}
+	fmt.Println("Second accum")
+	dec = box.Ecd.DecodeUintNew(box.Dec.DecryptNew(selected2))
+	fmt.Println(dec)
+
+	box.Evt.Relinearize(selected2, selected2)
+	//	box.Evt.Rescale(selected2, selected2)
+	dec = box.Ecd.DecodeUintNew(box.Dec.DecryptNew(selected2))
+	fmt.Println(dec)
+
+}
+
 func TestClientRetrieval(t *testing.T) {
 	//DB dimentions
 	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
@@ -95,7 +173,7 @@ func TestClientRetrieval(t *testing.T) {
 
 	for _, entries := range listOfEntries {
 		for _, size := range sizes {
-			for _, dimentions := range []int{2, 3} {
+			for _, dimentions := range []int{2} {
 				for _, n := range []int{12, 13, 14} {
 					//first we create a context for the PIR
 					if dimentions == 3 && n == 12 {

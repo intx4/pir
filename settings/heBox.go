@@ -11,14 +11,16 @@ poly_modulus_degree             | max coeff_modulus bit-length
 1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
 */
 var QI = map[int]map[int][]int{
+
+	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
 	2: {
-		4096:  []int{35, 35, 35}, //, 35},
-		8192:  []int{35, 35, 35}, //, 35},
-		16384: []int{35, 35, 35}, //, 35},
+		4096:  []int{35, 60},
+		8192:  []int{35, 60},
+		16384: []int{35, 60},
 	},
 	3: {
-		8192:  []int{35, 35, 35, 35}, //, 35},
-		16384: []int{35, 35, 35, 35}, //, 35},
+		8192:  []int{35, 60},
+		16384: []int{35, 60},
 	},
 }
 

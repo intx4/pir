@@ -144,7 +144,8 @@ func NewPirServer(c settings.PirContext, b settings.HeBox, keys [][]byte, values
 			PS.Store[k] = NewPirEntry(values[i])
 		}
 	}
-	log.Printf("	Storage encoded in chunks :\n		Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n		Tot Keys: %d\n", maxCollisions, PS.Context.ExpectedBinSize, PS.Context.MaxBinSize, PS.Context.K)
+	log.Println()
+	fmt.Printf("		Storage encoded in chunks :\n		Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n		Tot Keys: %d\n", maxCollisions, PS.Context.ExpectedBinSize, PS.Context.MaxBinSize, PS.Context.K)
 	return PS, nil
 }
 
@@ -182,6 +183,7 @@ func (PS *PIRServer) LoadRelinKey(rlk *rlwe.RelinearizationKey) {
 
 func (PS *PIRServer) Encode() (*sync.Map, error) {
 	ecdStore := new(sync.Map)
+	var wg sync.WaitGroup
 	pool := runtime.NumCPU()
 	poolCh := make(chan struct{}, pool)
 	errCh := make(chan error)
@@ -192,6 +194,8 @@ func (PS *PIRServer) Encode() (*sync.Map, error) {
 	for k, e := range PS.Store {
 		<-poolCh //if no routines this is blocking
 		go func(k string, e *PIREntry) {
+			wg.Add(1)
+			defer wg.Done()
 			v, err := e.Encode(PS.Context.TUsable, PS.Box)
 			if err != nil {
 				errCh <- err
@@ -202,6 +206,7 @@ func (PS *PIRServer) Encode() (*sync.Map, error) {
 			poolCh <- struct{}{} //restore 1 routine
 		}(k, e)
 	}
+	wg.Wait()
 	select {
 	case err := <-errCh:
 		return nil, err
@@ -228,6 +233,9 @@ type MultiplierTask struct {
 	ResultMap  *PIRStorage    //map to save result of query x values
 	ResultKey  string         //key of result map
 	FeedBackCh chan int       //flag completion of one mul to caller
+}
+
+func (PS *PIRServer) OblvExpand(query *rlwe.Ciphertext) {
 }
 
 /*
@@ -301,7 +309,6 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, query [][]*rlwe.Ciphertext, rlk
 					}
 				}
 			} else {
-				//nextStore.LoadOrStore("", make([]rlwe.Operand, 0))
 				k := strconv.FormatInt(int64(di), 10)
 				if e, ok := ecdStore.Load(k); ok {
 					numEffectiveKeys++
@@ -328,9 +335,8 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, query [][]*rlwe.Ciphertext, rlk
 					//after first we have done a ct x pt -> deg is still 1
 					evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 				}
-				evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 				if finalRound && key == "" {
-					//evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+					evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 					finalAnswer = append(finalAnswer, ct.(*rlwe.Ciphertext))
 				}
 			}
