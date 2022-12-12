@@ -6,6 +6,7 @@ import (
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"log"
+	"math"
 	"pir/settings"
 	"pir/utils"
 	"runtime"
@@ -235,7 +236,43 @@ type MultiplierTask struct {
 	FeedBackCh chan int       //flag completion of one mul to caller
 }
 
-func (PS *PIRServer) OblvExpand(query *rlwe.Ciphertext) {
+//func (PS *PIRServer) expandCt(ct *rlwe.Ciphertext, evt *rlwe.Evaluator) ([]*rlwe.Ciphertext, error) {
+//	//Follows https://github.com/OpenMined/PIR/blob/master/pir/cpp/server.cpp
+//
+//	logm := int(math.Ceil(math.Log2(float64(PS.Context.Kd))))
+//	result := make([]*rlwe.Ciphertext, 1<<logm)
+//	result[0] = ct
+//
+//	for j := 0; j < logm; j++ {
+//		twoPowj := 1 << j
+//		for k := 0; k < twoPowj; k++ {
+//			c0 := result[k]
+//			evt.Automorphism(c0, uint64(PS.Box.Params.N()>>j)+1, c0)
+//		}
+//	}
+//
+//}
+
+func (PS *PIRServer) ObliviousExpand(query []*rlwe.Ciphertext, rtKeys *rlwe.RotationKeySet) ([][]*rlwe.Ciphertext, error) {
+	//Procedure 7 from https://eprint.iacr.org/2019/1483.pdf
+
+	evt := rlwe.NewEvaluator(PS.Box.Params.Parameters, &rlwe.EvaluationKey{Rtks: rtKeys})
+
+	l := int(math.Ceil(float64(PS.Context.K) / float64(PS.Box.Params.N())))
+	if len(query) != l {
+		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", l, len(query)))
+	}
+	logm := int(math.Ceil(math.Log2(float64(PS.Context.Kd))))
+	if logm > PS.Box.Params.LogN() {
+		return nil, errors.New("m > N is not allowed")
+	}
+
+	expanded := make([][]*rlwe.Ciphertext, PS.Context.Dimentions)
+	var err error
+	for j := range query {
+		expanded[j] = evt.Expand(query[j], PS.Box.Params.LogN(), 0)
+	}
+	return expanded, err
 }
 
 /*

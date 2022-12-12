@@ -4,6 +4,7 @@ import (
 	"errors"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
+	"math"
 	"pir/settings"
 	"pir/utils"
 )
@@ -62,6 +63,62 @@ func (PC *PIRClient) QueryGen(key []byte) ([][]*rlwe.Ciphertext, error) {
 			queryOfDim[d] = c
 		}
 		query[i] = queryOfDim
+	}
+	return query, nil
+}
+func (PC *PIRClient) GenRtKeys() *rlwe.RotationKeySet {
+	galoisElts := make([]uint64, PC.Box.Params.LogN())
+	for i := range galoisElts {
+		galoisElts[i] = uint64((PC.Box.Params.N() >> i) + 1)
+	}
+	return rlwe.NewRotationKeySet(PC.Box.Params.Parameters, galoisElts)
+}
+
+func (PC *PIRClient) CompressedQueryGen(key []byte) ([]*rlwe.Ciphertext, error) {
+	if PC.Box.Ecd == nil || PC.Box.Enc == nil {
+		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
+	}
+	l := int(math.Ceil(float64(PC.Context.K) / float64(PC.Box.Params.N())))
+	_, keys := utils.MapKeyToIdx(key, PC.Context.Kd, PC.Context.Dimentions)
+	selectors := make([][]uint64, PC.Context.Dimentions)
+
+	//gen selection vectors
+	for i, k := range keys {
+		selectors[i] = make([]uint64, PC.Context.Kd)
+		selectors[i][k] = 1
+	}
+
+	//concat vectors
+	concatSelectors := make([][]uint64, l)
+	for i := range concatSelectors {
+		concatSelectors[i] = make([]uint64, PC.Box.Params.N())
+	}
+	offset := 0
+	for i := range concatSelectors {
+		if offset > PC.Context.K {
+			break
+		}
+		di := int(math.Floor(float64(offset) / float64(PC.Context.Kd)))
+		dj := offset % PC.Context.Kd
+		for j := 0; j < PC.Box.Params.N(); j++ {
+			concatSelectors[i][j] = selectors[di][dj]
+			offset++
+		}
+	}
+	query := make([]*rlwe.Ciphertext, PC.Context.Dimentions)
+	for i := range query {
+		for j := range concatSelectors[i] {
+			if concatSelectors[i][j] == 1 {
+				var err error
+				concatSelectors[i][j], err = utils.InvMod(concatSelectors[i][j], PC.Box.Params.T())
+				if err != nil {
+					return nil, err
+				}
+				//v := PC.Box.Ecd.EncodeNew(concatSelectors[i], PC.Box.Params.MaxLevel())
+				break
+			}
+		}
+		query[i] = PC.Box.Enc.EncryptNew(PC.Box.Ecd.EncodeNew(concatSelectors[i], PC.Box.Params.MaxLevel()))
 	}
 	return query, nil
 }
