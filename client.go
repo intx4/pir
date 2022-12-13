@@ -7,6 +7,7 @@ import (
 	"math"
 	"pir/settings"
 	"pir/utils"
+	"sync"
 )
 
 type PIRClient struct {
@@ -67,18 +68,29 @@ func (PC *PIRClient) QueryGen(key []byte) ([][]*rlwe.Ciphertext, error) {
 	return query, nil
 }
 func (PC *PIRClient) GenRtKeys() *rlwe.RotationKeySet {
-	galoisElts := make([]uint64, PC.Box.Params.LogN())
-	for i := range galoisElts {
-		galoisElts[i] = uint64((PC.Box.Params.N() >> i) + 1)
-	}
-	return rlwe.NewRotationKeySet(PC.Box.Params.Parameters, galoisElts)
+	galoisElts := PC.Box.Params.GaloisElementForExpand(int(math.Ceil(math.Log2(float64(PC.Context.Kd)))))
+	return PC.Box.Kgen.GenRotationKeys(galoisElts, PC.Box.Sk)
+}
+
+// Encodes d = [d0,d1,...,dn-1] as pt = d0 + d1X + ...dn-1X^n-1 and returns pt in NTT form
+func EncodeCoeffs(ecd bfv.Encoder, params bfv.Parameters, coeffs []uint64) *rlwe.Plaintext {
+	ptRt := bfv.NewPlaintextRingT(params)
+
+	copy(ptRt.Value.Coeffs[0], coeffs)
+
+	pt := bfv.NewPlaintext(params, params.MaxLevel())
+	ecd.ScaleUp(ptRt, pt)
+
+	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
+	pt.IsNTT = true
+	return pt
 }
 
 func (PC *PIRClient) CompressedQueryGen(key []byte) ([]*rlwe.Ciphertext, error) {
 	if PC.Box.Ecd == nil || PC.Box.Enc == nil {
 		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
-	l := int(math.Ceil(float64(PC.Context.K) / float64(PC.Box.Params.N())))
+	//l := int(math.Ceil(float64(PC.Context.K) / float64(PC.Box.Params.N())))
 	_, keys := utils.MapKeyToIdx(key, PC.Context.Kd, PC.Context.Dimentions)
 	selectors := make([][]uint64, PC.Context.Dimentions)
 
@@ -88,38 +100,33 @@ func (PC *PIRClient) CompressedQueryGen(key []byte) ([]*rlwe.Ciphertext, error) 
 		selectors[i][k] = 1
 	}
 
-	//concat vectors
-	concatSelectors := make([][]uint64, l)
-	for i := range concatSelectors {
-		concatSelectors[i] = make([]uint64, PC.Box.Params.N())
-	}
-	offset := 0
-	for i := range concatSelectors {
-		if offset > PC.Context.K {
-			break
-		}
-		di := int(math.Floor(float64(offset) / float64(PC.Context.Kd)))
-		dj := offset % PC.Context.Kd
-		for j := 0; j < PC.Box.Params.N(); j++ {
-			concatSelectors[i][j] = selectors[di][dj]
-			offset++
-		}
-	}
+	////concat vectors
+	//concatSelectors := make([][]uint64, l)
+	//for i := range concatSelectors {
+	//	concatSelectors[i] = make([]uint64, PC.Box.Params.N())
+	//}
+	//offset := 0
+	//for i := range concatSelectors {
+	//	if offset > PC.Context.K {
+	//		break
+	//	}
+	//	di := int(math.Floor(float64(offset) / float64(PC.Context.Kd)))
+	//	dj := offset % PC.Context.Kd
+	//	for j := 0; j < PC.Box.Params.N(); j++ {
+	//		concatSelectors[i][j] = selectors[di][dj]
+	//		offset++
+	//	}
+	//}
 	query := make([]*rlwe.Ciphertext, PC.Context.Dimentions)
+	var wg sync.WaitGroup
 	for i := range query {
-		for j := range concatSelectors[i] {
-			if concatSelectors[i][j] == 1 {
-				var err error
-				concatSelectors[i][j], err = utils.InvMod(concatSelectors[i][j], PC.Box.Params.T())
-				if err != nil {
-					return nil, err
-				}
-				//v := PC.Box.Ecd.EncodeNew(concatSelectors[i], PC.Box.Params.MaxLevel())
-				break
-			}
-		}
-		query[i] = PC.Box.Enc.EncryptNew(PC.Box.Ecd.EncodeNew(concatSelectors[i], PC.Box.Params.MaxLevel()))
+		wg.Add(1)
+		go func(i int, ecd bfv.Encoder, enc rlwe.Encryptor) {
+			defer wg.Done()
+			query[i] = enc.EncryptNew(EncodeCoeffs(ecd, PC.Box.Params, selectors[i]))
+		}(i, PC.Box.Ecd.ShallowCopy(), PC.Box.Enc.ShallowCopy())
 	}
+	wg.Wait()
 	return query, nil
 }
 

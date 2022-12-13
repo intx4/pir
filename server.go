@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
+	"github.com/tuneinsight/lattigo/v4/ring"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"log"
 	"math"
@@ -236,61 +237,76 @@ type MultiplierTask struct {
 	FeedBackCh chan int       //flag completion of one mul to caller
 }
 
-//func (PS *PIRServer) expandCt(ct *rlwe.Ciphertext, evt *rlwe.Evaluator) ([]*rlwe.Ciphertext, error) {
-//	//Follows https://github.com/OpenMined/PIR/blob/master/pir/cpp/server.cpp
-//
-//	logm := int(math.Ceil(math.Log2(float64(PS.Context.Kd))))
-//	result := make([]*rlwe.Ciphertext, 1<<logm)
-//	result[0] = ct
-//
-//	for j := 0; j < logm; j++ {
-//		twoPowj := 1 << j
-//		for k := 0; k < twoPowj; k++ {
-//			c0 := result[k]
-//			evt.Automorphism(c0, uint64(PS.Box.Params.N()>>j)+1, c0)
-//		}
-//	}
-//
-//}
+// puts back from NTT domain the ciphertexts and returns expandedCts[:t]
+func invNTTforExpand(expandedCts []*rlwe.Ciphertext, t int, Q *ring.Ring) []*rlwe.Ciphertext {
+	for _, expCt := range expandedCts[:t] {
+		for _, ci := range expCt.Value {
+			Q.InvNTTLvl(expCt.Level(), ci, ci)
+		}
+		expCt.IsNTT = false
+	}
+	return expandedCts[:t]
+}
 
+// Obliviously expands a compressed query vector. Queries must provided rotation keys
 func (PS *PIRServer) ObliviousExpand(query []*rlwe.Ciphertext, rtKeys *rlwe.RotationKeySet) ([][]*rlwe.Ciphertext, error) {
 	//Procedure 7 from https://eprint.iacr.org/2019/1483.pdf
-
 	evt := rlwe.NewEvaluator(PS.Box.Params.Parameters, &rlwe.EvaluationKey{Rtks: rtKeys})
-
-	l := int(math.Ceil(float64(PS.Context.K) / float64(PS.Box.Params.N())))
-	if len(query) != l {
-		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", l, len(query)))
+	if len(query) != PS.Context.Dimentions {
+		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", PS.Context.Dimentions, len(query)))
 	}
 	logm := int(math.Ceil(math.Log2(float64(PS.Context.Kd))))
 	if logm > PS.Box.Params.LogN() {
 		return nil, errors.New("m > N is not allowed")
 	}
-
 	expanded := make([][]*rlwe.Ciphertext, PS.Context.Dimentions)
 	var err error
+	var wg sync.WaitGroup
 	for j := range query {
-		expanded[j] = evt.Expand(query[j], PS.Box.Params.LogN(), 0)
+		wg.Add(1)
+		go func(j int, evt *rlwe.Evaluator) {
+			defer wg.Done()
+			expanded[j] = invNTTforExpand(evt.Expand(query[j], logm, 0), PS.Context.Kd, PS.Box.Params.RingQ())
+		}(j, evt.ShallowCopy())
 	}
+	wg.Wait()
 	return expanded, err
 }
 
 /*
 Given an encoded PIR database and a query from client, answers the query.
-
-	The query is represented as a series of ciphertext where every ciphertexts in Enc(0), but for one
-	where one of the N slots is set to 1 to select the associated index in the db.
-	For every bucket (which consists of N (ring size of BFV) entries, with 1 or more data items), it multiplies the bucket
-	with the associated ciphertext in the query.
-	After that, all these results get accumulated by summing the results.
-	Returns a list of ciphertexts, i.e the answer, which is the result of the accumulation
-	between all buckets in the server multiplied by the query. Ideally only one element in a certain bucket will survive
-	the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
+The query can be represented as:
+  - a series query vectors of ciphertexts. In each vector (we have d vectors for d dimentions), each ciphertext is Enc(0), but for one
+    where ct is Enc(1). If this ct is the ct in position i-th, then you will retrieve all associated to index i for this dimention
+  - a series of d ciphertexts. In this case the query goes through an oblivious expansion procedure that generates the same query as case 1
+    For every bucket (which consists of N (ring size of BFV) entries, with 1 or more data items), it multiplies the bucket
+    with the associated ciphertext in the query.
+    After that, all these results get accumulated by summing the results.
+    Returns a list of ciphertexts, i.e the answer, which is the result of the accumulation
+    between all buckets in the server multiplied by the query. Ideally only one element in a certain bucket will survive
+    the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
 */
-func (PS *PIRServer) AnswerGen(ecdStore Storage, query [][]*rlwe.Ciphertext, rlk *rlwe.RelinearizationKey) ([]*rlwe.Ciphertext, error) {
+func (PS *PIRServer) AnswerGen(ecdStore Storage, queryRecvd interface{}, rlk *rlwe.RelinearizationKey, rtks *rlwe.RotationKeySet) ([]*rlwe.Ciphertext, error) {
+	var query [][]*rlwe.Ciphertext
+	switch queryRecvd.(type) {
+	case []*rlwe.Ciphertext:
+		var err error
+		if rtks == nil {
+			return nil, errors.New("Client needs to provide rtks keys")
+		}
+		query, err = PS.ObliviousExpand(queryRecvd.([]*rlwe.Ciphertext), rtks)
+		if err != nil {
+			return nil, err
+		}
+	case [][]*rlwe.Ciphertext:
+		query = queryRecvd.([][]*rlwe.Ciphertext)
+	default:
+		return nil, errors.New(fmt.Sprintf("Query must be []*rlwe.Ciphertext or [][]*rlwe.Ciphertext, not %T", query))
+	}
+
 	evt := bfv.NewEvaluator(PS.Box.Params, rlwe.EvaluationKey{Rlk: rlk})
 	if PS.Context.Kd != len(query[0]) {
-		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", PS.Context.Kd, len(query[0])))
+		return nil, errors.New(fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", PS.Context.Kd, len(query[0])))
 	}
 	if PS.Context.Dimentions != len(query) {
 		return nil, errors.New(fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", PS.Context.Dimentions, len(query)))
@@ -368,12 +384,14 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, query [][]*rlwe.Ciphertext, rlk
 		nextStore.Mux.RLock()
 		for key, value := range nextStore.Map {
 			for _, ct := range value {
-				if d != 0 {
+				if d != 0 && ct.Degree() > 1 {
 					//after first we have done a ct x pt -> deg is still 1
 					evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
 				}
 				if finalRound && key == "" {
-					evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+					for ct.(*rlwe.Ciphertext).Level() != 0 {
+						evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+					}
 					finalAnswer = append(finalAnswer, ct.(*rlwe.Ciphertext))
 				}
 			}
@@ -401,7 +419,11 @@ func SpawnMultiplier(evt bfv.Evaluator, taskCh chan MultiplierTask) {
 		}
 		intermediateResult := make([]*rlwe.Ciphertext, 0)
 		for _, op := range task.Values {
-			intermediateResult = append(intermediateResult, evt.MulNew(task.Query, op))
+			el := evt.MulNew(task.Query, op)
+			if el.Degree() > 1 {
+				evt.Relinearize(el, el)
+			}
+			intermediateResult = append(intermediateResult, el)
 		}
 		//compress (accumulate result with lazy modswitch and relin) atomically
 		task.ResultMap.Mux.Lock()

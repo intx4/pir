@@ -3,6 +3,8 @@ package utils
 import (
 	"crypto/md5"
 	"errors"
+	"fmt"
+	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"math"
 	"math/big"
@@ -210,4 +212,15 @@ func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
 		h1.Reset()
 	}
 	return coords[:len(coords)-1], coordsAsInt
+}
+
+func ShowCoeffs(ct *rlwe.Ciphertext, box settings.HeBox) {
+	decR := box.Dec.DecryptNew(ct)
+	ptRt := bfv.NewPlaintextRingT(box.Params)
+	if decR.IsNTT {
+		fmt.Println("NTT")
+		box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
+	}
+	box.Ecd.ScaleDown(decR, ptRt)
+	fmt.Println(ptRt.Value.Coeffs[0])
 }

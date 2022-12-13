@@ -5,12 +5,14 @@ import (
 	"fmt"
 	"github.com/stretchr/testify/require"
 	"github.com/tuneinsight/lattigo/v4/bfv"
+	"github.com/tuneinsight/lattigo/v4/rgsw"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"math"
 	"pir"
 	"pir/settings"
 	"pir/utils"
 	"testing"
+	"time"
 )
 
 // This test takes time
@@ -147,111 +149,30 @@ func TestServerEntryManipulation(t *testing.T) {
 	}
 }
 
-func TestObliiviousExpansionBFV(t *testing.T) {
-	params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
-		LogN:     12,
-		LogQ:     []int{35, 35, 35},
-		LogP:     nil,
-		Pow2Base: 0,
-		Sigma:    0,
-		H:        0,
-		T:        uint64(65537),
-	})
-	box := settings.HeBox{
-		Params: params,
-		Sk:     nil,
-		Pk:     nil,
-		Kgen:   bfv.NewKeyGenerator(params),
-		Ecd:    bfv.NewEncoder(params),
-		Enc:    nil,
-		Dec:    nil,
-		Evt:    nil,
-	}
-	sk, pk := box.Kgen.GenKeyPair()
-	box.Sk = sk
-	box.Pk = pk
-	rlk, _ := box.GenRelinKey()
-	box.Evt = bfv.NewEvaluator(params, rlwe.EvaluationKey{Rlk: rlk})
-	box.Enc = bfv.NewEncryptor(params, pk)
-	box.Dec = bfv.NewDecryptor(params, sk)
-	logN := params.LogN()
-	logGap := 0
-	gap := 1
-
-	ptRt := bfv.NewPlaintextRingT(box.Params)
-
-	values := make([]uint64, params.N())
-	scale, _ := utils.InvMod(1<<logN, params.T())
-	scale = 1
-	values[2] = scale
-
-	copy(ptRt.Value.Coeffs[0], values)
-
-	pt := bfv.NewPlaintext(box.Params, box.Params.MaxLevel())
-	box.Ecd.ScaleUp(ptRt, pt)
-
-	//put in NTT for expand
-	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
-	pt.IsNTT = true
-
-	ctIn := bfv.NewCiphertext(box.Params, 1, params.MaxLevel())
-	box.Enc.Encrypt(pt, ctIn)
-
-	// Rotation Keys
-	galEls := params.GaloisElementForExpand(logN)
-
-	rtks := box.Kgen.GenRotationKeys(galEls, sk)
-
-	eval := rlwe.NewEvaluator(box.Params.Parameters, &rlwe.EvaluationKey{Rtks: rtks})
-
-	ciphertexts := eval.Expand(ctIn, logN, logGap)
-
-	bound := uint64(params.N() * params.N())
-
-	for i := range ciphertexts {
-		box.Dec.Decrypt(ciphertexts[i], pt)
-
-		if pt.IsNTT {
-			params.RingQ().InvNTTLvl(pt.Level(), pt.Value, pt.Value)
-		}
-
-		box.Ecd.ScaleDown(pt, ptRt)
-
-		for j := 0; j < ptRt.Level()+1; j++ {
-
-			T := params.RingT().Modulus[j]
-			QHalf := T >> 1
-
-			for k, c := range ptRt.Value.Coeffs[j] {
-
-				if c >= QHalf {
-					c = T - c
-				}
-
-				if k != 0 {
-					require.Greater(t, bound, c)
-					require.Equal(t, int64(0), int64(c))
-				} else {
-					require.InDelta(t, 0, math.Abs(float64(values[i*gap]/scale)-float64(c)), 0.0001)
-					fmt.Println(values[i*gap], int64(c))
-					fmt.Println()
-				}
-			}
-		}
-	}
-}
-
 func EncodeCoeffs(ecd bfv.Encoder, params bfv.Parameters, coeffs []uint64) *rlwe.Plaintext {
 	ptRt := bfv.NewPlaintextRingT(params)
 
 	copy(ptRt.Value.Coeffs[0], coeffs)
-
+	//params.RingT().NTTLvl(ptRt.Level(), ptRt.Plaintext.Value, ptRt.Plaintext.Value)
+	//ptRt.IsNTT = true
 	pt := bfv.NewPlaintext(params, params.MaxLevel())
 	ecd.ScaleUp(ptRt, pt)
-
-	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
-	pt.IsNTT = true
+	//
+	//	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
+	//	pt.IsNTT = true
 	return pt
+}
+
+func ShowCoeffs(ct *rlwe.Ciphertext, box settings.HeBox) {
+	decR := box.Dec.DecryptNew(ct)
+	ptRt := bfv.NewPlaintextRingT(box.Params)
+
+	if decR.IsNTT {
+		fmt.Println("NTT")
+		box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
+	}
+	box.Ecd.ScaleDown(decR, ptRt)
+	fmt.Println(ptRt.Value.Coeffs[0])
 }
 
 type HeBox struct {
@@ -265,18 +186,14 @@ type HeBox struct {
 	Evt    bfv.Evaluator
 }
 
-func TestObliiviousExpansionBFVWithRetrieval(t *testing.T) {
-	//params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
-	//	LogN:     12,
-	//	LogQ:     []int{35, 35, 35},
-	//	LogP:     nil,
-	//	Pow2Base: 0,
-	//	Sigma:    0,
-	//	H:        0,
-	//	T:        uint64(65537),
-	//})
-	params, _ := bfv.NewParametersFromLiteral(bfv.PN11QP54)
-	box := HeBox{
+func TestObliviousExpansionBFVWithRetrieval(t *testing.T) {
+	params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
+		LogN: 12,
+		LogQ: []int{35, 35, 35},
+		T:    uint64(65537),
+	})
+
+	box := settings.HeBox{
 		Params: params,
 		Sk:     nil,
 		Pk:     nil,
@@ -291,28 +208,62 @@ func TestObliiviousExpansionBFVWithRetrieval(t *testing.T) {
 	box.Pk = pk
 	rlk := box.Kgen.GenRelinearizationKey(box.Sk, 3)
 	box.Evt = bfv.NewEvaluator(params, rlwe.EvaluationKey{Rlk: rlk})
-	box.Enc = bfv.NewEncryptor(params, pk)
+	box.Enc = bfv.NewEncryptor(params, sk)
 	box.Dec = bfv.NewDecryptor(params, sk)
 	logN := params.LogN()
 	logGap := 0
 
-	values := make([]uint64, params.N())
+	values := make([]uint64, 4)
 	values[2] = 1
 
-	pt := EncodeCoeffs(box.Ecd, box.Params, values)
-
-	ctIn := bfv.NewCiphertext(box.Params, 1, params.MaxLevel())
-	box.Enc.Encrypt(pt, ctIn) // enc (X^2)
+	values2 := make([]uint64, 1)
+	values2[0] = 1
 
 	// Rotation Keys
 	galEls := params.GaloisElementForExpand(logN)
-
 	rtks := box.Kgen.GenRotationKeys(galEls, sk)
 
+	pt := EncodeCoeffs(box.Ecd, box.Params, values)
+
+	//ctIn := bfv.NewCiphertext(box.Params, 1, params.MaxLevel())
+	ctIn := box.Enc.EncryptNew(pt) // enc (X^2)
+	for _, p := range ctIn.Value {
+		box.Params.RingQ().NTTLvl(ctIn.Level(), p, p)
+	}
+	ctIn.IsNTT = true
+
 	eval := rlwe.NewEvaluator(box.Params.Parameters, &rlwe.EvaluationKey{Rtks: rtks})
+	start := time.Now()
 
-	ciphertexts := eval.Expand(ctIn, logN, logGap)
+	ciphertexts := eval.Expand(ctIn, 2, logGap)
+	for _, c := range ciphertexts {
+		//	for _, p := range c.Value {
+		//		box.Params.RingQ().InvNTTLvl(c.Level(), p, p)
+		//	}
+		//	c.IsNTT = false
+		ShowCoeffs(c, box)
+	}
+	end := time.Since(start)
+	fmt.Println(":::::::::::::::::::::::::::::::::::::::::::::::::")
+	pt = EncodeCoeffs(box.Ecd, box.Params, values2)
+	ctIn = box.Enc.EncryptNew(pt) // enc (X^0)
+	for _, p := range ctIn.Value {
+		box.Params.RingQ().NTTLvl(ctIn.Level(), p, p)
+	}
+	ctIn.IsNTT = true
+	ciphertexts2 := eval.Expand(ctIn, 1, logGap)
+	for _, c := range ciphertexts2 {
+		//	for _, p := range c.Value {
+		//		box.Params.RingQ().InvNTTLvl(c.Level(), p, p)
+		//	}
+		//	c.IsNTT = false
+		ShowCoeffs(c, box)
+	}
+	//for _, c := range ciphertexts2 {
+	//	utils.ShowCoeffs(c, box)
+	//}
 
+	fmt.Println("Time exp ", end)
 	data := make([][]uint64, len(ciphertexts))
 	for i := range data {
 		data[i] = make([]uint64, params.N())
@@ -320,67 +271,48 @@ func TestObliiviousExpansionBFVWithRetrieval(t *testing.T) {
 			data[i][j] = uint64(i)
 		}
 	}
-	pts := make([]*rlwe.Plaintext, len(data))
-
-	fmt.Println("level", ciphertexts[0].Level()-params.MaxLevel())
+	pts := make([]*bfv.PlaintextMul, len(data))
 	for i := range pts {
-		pts[i] = EncodeCoeffs(box.Ecd, box.Params, data[i])
-		if !pts[i].IsNTT {
-			params.RingQ().NTTLvl(pts[i].Level(), pts[i].Value, pts[i].Value)
-			pts[i].IsNTT = true
-		} else {
-			params.RingQ().InvNTTLvl(pts[i].Level(), pts[i].Value, pts[i].Value)
-			pts[i].IsNTT = false
-		}
+		pts[i] = box.Ecd.EncodeMulNew(data[i], params.MaxLevel())
 	}
-	ptRt := bfv.NewPlaintextRingT(params)
 
-	decR := box.Dec.DecryptNew(ciphertexts[2])
-	if decR.IsNTT {
-		fmt.Println("NTT")
-		params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
+	start = time.Now()
+	result := box.Evt.MulNew(ciphertexts[0], pts[0])
+
+	//[1 0 0 0...] x [2 2 ...2] + 0..0
+	for i := 1; i < len(pts); i++ {
+		box.Evt.Add(result, box.Evt.MulNew(ciphertexts[i], pts[i]), result)
 	}
-	box.Ecd.ScaleDown(decR, ptRt)
-	fmt.Println(ptRt.Value.Coeffs[0]) //[1 0 0 0...0]
+	r := result.CopyNew()
+	decR := box.Dec.DecryptNew(r)
+	resP := box.Ecd.DecodeUintNew(decR)
+	fmt.Println(resP)
+	result2 := box.Evt.MulNew(result, ciphertexts2[0])
+	r = result2.CopyNew()
+	box.Evt.Relinearize(r, r)
+	decR = box.Dec.DecryptNew(r)
+	resP = box.Ecd.DecodeUintNew(decR)
+	fmt.Println(resP)
+	result2 = box.Evt.AddNew(result2, box.Evt.MulNew(result, ciphertexts2[1]))
+	r = result2.CopyNew()
+	box.Evt.Relinearize(r, r)
+	decR = box.Dec.DecryptNew(r)
+	resP = box.Ecd.DecodeUintNew(decR)
+	fmt.Println(resP)
 
-	pt.Copy(pts[2])
-	if pt.IsNTT {
-		fmt.Println("NTT")
-		params.RingQ().InvNTTLvl(pt.Level(), pt.Value, pt.Value)
-	}
-	box.Ecd.ScaleDown(pt, ptRt)
-	fmt.Println(ptRt.Value.Coeffs[0]) //[2 2 2 2 2 2...2]
+	//DECRYPT
+	box.Evt.Relinearize(result2, result2)
+	//Reverse NTT
+	r = result2.CopyNew()
+	end = time.Since(start)
+	fmt.Println("Time: ", end)
 
-	//reverse NTT
-	for _, p := range ciphertexts[2].Value {
-		box.Params.RingQ().InvNTTLvl(ciphertexts[2].Level(), p, p)
-		ciphertexts[2].IsNTT = false
-	}
-	decR = box.Dec.DecryptNew(ciphertexts[2])
-	if decR.IsNTT {
-		fmt.Println("NTT")
-		params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
-	}
-	box.Ecd.ScaleDown(decR, ptRt)
-	fmt.Println(ptRt.Value.Coeffs[0]) //[1 0 0 0...0]
-
-	result := box.Evt.MulNew(ciphertexts[2], pts[2]) //[1 0 0 0...] x [2 2 ...2]
-
-	decR = box.Dec.DecryptNew(result)
-	if decR.IsNTT {
-		fmt.Println("NTT")
-		params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
-	}
-	box.Ecd.ScaleDown(decR, ptRt)
-	fmt.Println(ptRt.Value.Coeffs[0])
-
-	for i, c := range ptRt.Value.Coeffs[0] {
-		T := params.RingT().Modulus[0]
-		THalf := T >> 1
-		if c >= THalf {
-			c = T - c
-		}
-		require.Equal(t, data[2][i], c)
+	decR = box.Dec.DecryptNew(result2)
+	box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
+	resP = box.Ecd.DecodeUintNew(decR)
+	for i, r := range resP {
+		fmt.Println(data[2][i], r)
+		require.Equal(t, data[2][i], r)
 	}
 }
 
@@ -419,6 +351,72 @@ func TestObliiviousExpansionRLWE(t *testing.T) {
 
 	ciphertexts := eval.Expand(ctIn, logN, logGap)
 
+	bound := uint64(params.N() * params.N())
+
+	for i := range ciphertexts {
+
+		decryptor.Decrypt(ciphertexts[i], pt)
+
+		if pt.IsNTT {
+			params.RingQ().InvNTTLvl(pt.Level(), pt.Value, pt.Value)
+		}
+
+		for j := 0; j < pt.Level()+1; j++ {
+
+			Q := params.RingQ().Modulus[j]
+			QHalf := Q >> 1
+
+			for k, c := range pt.Value.Coeffs[j] {
+
+				if c >= QHalf {
+					c = Q - c
+				}
+
+				if k != 0 {
+					require.Greater(t, bound, c)
+					require.Equal(t, int64(0), int64(c)/int64(scale))
+				} else {
+					require.InDelta(t, 0, math.Abs(float64(values[i*gap])-float64(c))/float64(scale), 0.5)
+					fmt.Println(values[i*gap]/uint64(scale), int64(c)/int64(scale))
+					fmt.Println()
+				}
+			}
+		}
+	}
+}
+
+func TestObliiviousExpansionRGSW(t *testing.T) {
+	params, _ := rlwe.NewParametersFromLiteral(rlwe.TestPN13QP218)
+	kgen := rlwe.NewKeyGenerator(params)
+	sk := kgen.GenSecretKey()
+	encryptor := rgsw.NewEncryptor(params, sk)
+	decryptor := rlwe.NewDecryptor(params, sk)
+	pt := rlwe.NewPlaintext(params, params.MaxLevel())
+
+	logN := params.LogN()
+	logGap := 0
+	gap := 1 << logGap
+	scale := 1 << 24
+
+	values := make([]uint64, params.N())
+	values[2] = uint64(scale)
+	for i := 0; i < pt.Level()+1; i++ {
+		copy(pt.Value.Coeffs[i], values)
+	}
+
+	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
+	pt.IsNTT = true
+
+	ctIn := encryptor.EncryptNew(pt)
+
+	// Rotation Keys
+	galEls := params.GaloisElementForExpand(logN)
+
+	rtks := kgen.GenRotationKeys(galEls, sk)
+	eval := rlwe.NewEvaluator(params, &rlwe.EvaluationKey{Rtks: rtks})
+	ctw := rgsw.NewCiphertext(sk.LevelQ(), sk.LevelP(), params.DecompRNS(sk.LevelQ(), sk.LevelP()), params.DecompPw2(sk.LevelQ(), sk.LevelP()), *params.RingQP())
+	rgsw.NewEncryptor(params, sk).Encrypt(rlwe.NewPlaintextAtLevelFromPoly(sk.LevelQ(), sk.Value.Q), ctw)
+	ciphertexts := eval.Expand(ctIn, logN, logGap)
 	bound := uint64(params.N() * params.N())
 
 	for i := range ciphertexts {
