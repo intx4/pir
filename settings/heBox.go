@@ -27,12 +27,12 @@ var QIforExp = map[int]map[int][]int{
 	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
 	2: {
 		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
-		8192:  []int{35, 60, 60},
-		16384: []int{35, 60, 60},
+		8192:  []int{35, 45, 45, 45},
+		16384: []int{35, 45, 45, 45},
 	},
 	3: {
-		8192:  []int{35, 60},
-		16384: []int{35, 60},
+		8192:  []int{35, 60, 60},
+		16384: []int{35, 60, 60},
 	},
 }
 

@@ -252,13 +252,15 @@ func TestCircuitWithLateModSwitch(t *testing.T) {
 
 func TestClientRetrieval(t *testing.T) {
 	//DB dimentions
+	os.Chdir(os.ExpandEnv("$HOME/pir"))
 	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
 
 	listOfEntries := []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
 	sizes := []int{30 * 8, 188 * 8, 288 * 8}
 
-	os.Remove("data/pirGo.csv")
-	csvFile, err := os.Create("data/pirGo.csv")
+	path := os.ExpandEnv("$HOME/pir/data/pirGo.csv")
+	os.Remove(path)
+	csvFile, err := os.Create(path)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}
@@ -411,13 +413,14 @@ func TestClientRetrieval(t *testing.T) {
 
 func TestClientRetrievalWithObliviousExpansion(t *testing.T) {
 	//DB dimentions
+	os.Chdir(os.ExpandEnv("$HOME/pir"))
 	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
 
-	listOfEntries := []int{1 << 5, 1 << 14, 1 << 16, 1 << 18, 1 << 20}
+	listOfEntries := []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
 	sizes := []int{30 * 8, 188 * 8, 288 * 8}
-
-	os.Remove("data/pirGoOblivious.csv")
-	csvFile, err := os.Create("data/pirGoOblivious.csv")
+	path := os.ExpandEnv("$HOME/pir/data/pirGoOblivious.csv")
+	os.Remove(path)
+	csvFile, err := os.Create(path)
 	if err != nil {
 		t.Fatalf(err.Error())
 	}

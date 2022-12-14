@@ -83,7 +83,7 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 				break
 			}
 		}
-		if math.Ceil((dc+1)*math.Log(K)) < float64(PC.MaxBinSize)*1.1 && dc != 0.0 {
+		if math.Ceil((dc+1)*math.Log(K)) < float64(PC.MaxBinSize)*1.01 && dc != 0.0 {
 			PC.ExpectedBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
 			PC.K, PC.Kd = RoundUpToDim(K, Dimentions)
 			break
