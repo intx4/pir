@@ -30,6 +30,7 @@ type PirContext struct {
 	ExpectedBinSize int
 	K               int
 	Kd              int
+	Expansion       bool
 }
 
 var genF = func(c float64) func(x float64) float64 {
@@ -38,7 +39,7 @@ var genF = func(c float64) func(x float64) float64 {
 	}
 }
 
-//Takes K and returns NewK and Kd such that pow(Kd,Dim) = NewK >= K
+// Takes K and returns NewK and Kd such that pow(Kd,Dim) = NewK >= K
 func RoundUpToDim(K float64, Dim int) (int, int) {
 	Kd := math.Floor(math.Pow(K, 1.0/float64(Dim)))
 	if math.Abs(math.Pow(Kd, float64(Dim))-K) <= 1e-7 {
@@ -48,11 +49,11 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 	}
 
 }
-func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable int) (*PirContext, error) {
+func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable int, expansion bool) (*PirContext, error) {
 	if Dimentions < 0 || Dimentions > 3 {
 		return nil, errors.New("Hypercube dimention can be 0 to 3")
 	}
-	PC := &PirContext{DBItems: Items, DBSize: Size, Dimentions: Dimentions, N: N, T: T, TUsable: tUsable, MaxBinSize: int(math.Floor((float64(tUsable) * math.Pow(2, float64(N))) / float64(Size)))}
+	PC := &PirContext{DBItems: Items, DBSize: Size, Dimentions: Dimentions, N: N, T: T, TUsable: tUsable, MaxBinSize: int(math.Floor((float64(tUsable) * math.Pow(2, float64(N))) / float64(Size))), Expansion: expansion}
 
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := math.E

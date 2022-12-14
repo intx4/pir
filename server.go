@@ -6,8 +6,11 @@ import (
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/ring"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
+	"github.com/tuneinsight/lattigo/v4/rlwe/ringqp"
+	utils2 "github.com/tuneinsight/lattigo/v4/utils"
 	"log"
 	"math"
+	"math/rand"
 	"pir/settings"
 	"pir/utils"
 	"runtime"
@@ -286,25 +289,41 @@ The query can be represented as:
     between all buckets in the server multiplied by the query. Ideally only one element in a certain bucket will survive
     the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
 */
-func (PS *PIRServer) AnswerGen(ecdStore Storage, queryRecvd interface{}, rlk *rlwe.RelinearizationKey, rtks *rlwe.RotationKeySet) ([]*rlwe.Ciphertext, error) {
+func (PS *PIRServer) AnswerGen(ecdStore Storage, queryRecvd interface{}, pp *settings.PIRProfile) ([]*rlwe.Ciphertext, error) {
+	//Initialize sampler from user seed
+	rand.Seed(pp.Seed)
+	keyPRNG := make([]byte, 64)
+	rand.Read(keyPRNG)
+	prng, err := utils2.NewKeyedPRNG(keyPRNG)
+	if err != nil {
+		return nil, err
+	}
+	sampler := ringqp.NewUniformSampler(prng, *PS.Box.Params.RingQP())
 	var query [][]*rlwe.Ciphertext
 	switch queryRecvd.(type) {
-	case []*rlwe.Ciphertext:
+	case []*PIRQueryCt:
 		var err error
-		if rtks == nil {
-			return nil, errors.New("Client needs to provide rtks keys")
+		if pp.Rtks == nil {
+			return nil, errors.New("Client needs to provide rotation keys for Expand")
 		}
-		query, err = PS.ObliviousExpand(queryRecvd.([]*rlwe.Ciphertext), rtks)
+		queryDecompressed, err := DecompressCT(queryRecvd, sampler, PS.Box.Params)
+		query, err = PS.ObliviousExpand(queryDecompressed.([]*rlwe.Ciphertext), pp.Rtks)
 		if err != nil {
 			return nil, err
 		}
-	case [][]*rlwe.Ciphertext:
-		query = queryRecvd.([][]*rlwe.Ciphertext)
+	case [][]*PIRQueryCt:
+		queryDecompressed, err := DecompressCT(queryRecvd, sampler, PS.Box.Params)
+		if err != nil {
+			return nil, err
+		}
+		query = queryDecompressed.([][]*rlwe.Ciphertext)
 	default:
 		return nil, errors.New(fmt.Sprintf("Query must be []*rlwe.Ciphertext or [][]*rlwe.Ciphertext, not %T", query))
 	}
-
-	evt := bfv.NewEvaluator(PS.Box.Params, rlwe.EvaluationKey{Rlk: rlk})
+	if pp.Rlk == nil {
+		return nil, errors.New("Relinearization key for user is nil")
+	}
+	evt := bfv.NewEvaluator(PS.Box.Params, rlwe.EvaluationKey{Rlk: pp.Rlk})
 	if PS.Context.Kd != len(query[0]) {
 		return nil, errors.New(fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", PS.Context.Kd, len(query[0])))
 	}
@@ -420,9 +439,9 @@ func SpawnMultiplier(evt bfv.Evaluator, taskCh chan MultiplierTask) {
 		intermediateResult := make([]*rlwe.Ciphertext, 0)
 		for _, op := range task.Values {
 			el := evt.MulNew(task.Query, op)
-			if el.Degree() > 1 {
-				evt.Relinearize(el, el)
-			}
+			//if el.Degree() > 1 {
+			//	evt.Relinearize(el, el)
+			//}
 			intermediateResult = append(intermediateResult, el)
 		}
 		//compress (accumulate result with lazy modswitch and relin) atomically

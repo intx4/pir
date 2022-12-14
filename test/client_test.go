@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
+	"github.com/tuneinsight/lattigo/v4/rlwe/ringqp"
+	utils2 "github.com/tuneinsight/lattigo/v4/utils"
 	"log"
 	"math/rand"
 	"os"
@@ -27,7 +29,7 @@ func TestClientQueryGen(t *testing.T) {
 	for _, item := range items {
 		for _, size := range sizes {
 			for _, dimentions := range []int{2, 3} {
-				context, err := settings.NewPirContext(item, size, dimentions, 13, 65537, 16)
+				context, err := settings.NewPirContext(item, size, dimentions, 13, 65537, 16, true)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
@@ -46,13 +48,26 @@ func TestClientQueryGen(t *testing.T) {
 				choice := rand.Int() % len(keys)
 				_, choosenIdx := utils.MapKeyToIdx(keys[choice], context.Kd, context.Dimentions)
 				query, err := client.QueryGen(keys[choice])
+
+				if err != nil {
+					t.Fatalf(err.Error())
+				}
+				profile, err := client.GenProfile()
+				if err != nil {
+					t.Fatalf(err.Error())
+				}
+				sampler, err := pir.NewSampler(profile.Seed, client.Box.Params)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
 				for d, di := range choosenIdx {
 					q := query[d]
-					for i, ct := range q {
-						pt := client.Box.Dec.DecryptNew(ct)
+					for i, ctc := range q {
+						ct, err := pir.DecompressCT(ctc, *sampler, client.Box.Params)
+						if err != nil {
+							t.Fatalf(err.Error())
+						}
+						pt := client.Box.Dec.DecryptNew(ct.(*rlwe.Ciphertext))
 						v := client.Box.Ecd.DecodeUintNew(pt)
 						if i == di {
 							for _, n := range v {
@@ -74,15 +89,57 @@ func TestClientQueryGen(t *testing.T) {
 	}
 }
 
+// When encrypting with sk the ciphertext consists of a tuple
+// where one element is sampled at random -> we can subsitute a polynomial with a random seed and
+// let the server regenerate it
+func TestCompressionOfCt(t *testing.T) {
+	params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
+		LogN: 13,
+		LogQ: settings.QI[2][1<<13],
+		T:    uint64(65537),
+	})
+	box := settings.HeBox{
+		Params: params,
+		Sk:     nil,
+		Pk:     nil,
+		Kgen:   bfv.NewKeyGenerator(params),
+		Ecd:    bfv.NewEncoder(params),
+		Enc:    nil,
+		Dec:    nil,
+		Evt:    nil,
+	}
+	sk := box.Kgen.GenSecretKey()
+	rand.Seed(123)
+	keyPRNG := make([]byte, 64)
+	rand.Read(keyPRNG)
+	prng, err := utils2.NewKeyedPRNG(keyPRNG)
+	if err != nil {
+		t.Fatalf(err.Error())
+	}
+	box.Enc = bfv.NewPRNGEncryptor(params, sk).WithPRNG(prng)
+	box.Ecd = bfv.NewEncoder(params)
+	box.Dec = bfv.NewDecryptor(params, sk)
+	ct := box.Enc.EncryptNew(box.Ecd.EncodeNew([]uint64{1, 2, 3}, params.MaxLevel()))
+
+	// c0 := ct.Value[0]
+	prng2, _ := utils2.NewKeyedPRNG(keyPRNG)
+	sampler := ringqp.NewUniformSampler(prng2, *params.RingQP())
+	ct2 := bfv.NewCiphertext(params, ct.Degree(), ct.Level())
+	sampler.ReadLvl(ct.Level(), -1, ringqp.Poly{Q: ct2.Value[1]})
+	ct2.MetaData = ct.MetaData
+	params.RingQ().InvNTTLvl(ct2.Level(), ct2.Value[1], ct2.Value[1])
+	//ct2.Value[1] = ct.Value[1]
+	ct2.Value[0] = ct.Value[0]
+	fmt.Println(box.Ecd.DecodeUintNew(box.Dec.DecryptNew(ct2)))
+}
+
+/*
 func TestCircuitWithLateModSwitch(t *testing.T) {
 	params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
-		LogN:     12,
-		LogQ:     settings.QI[2][1<<12],
-		LogP:     nil,
-		Pow2Base: 0,
-		Sigma:    0,
-		H:        0,
-		T:        uint64(65537),
+		LogN: 12,
+		LogQ: settings.QI[2][1<<12],
+		LogP: nil,
+		T:    uint64(65537),
 	})
 	box := settings.HeBox{
 		Params: params,
@@ -151,6 +208,7 @@ func TestCircuitWithLateModSwitch(t *testing.T) {
 	fmt.Println(dec)
 
 }
+*/
 
 func TestClientRetrieval(t *testing.T) {
 	//DB dimentions
@@ -174,12 +232,12 @@ func TestClientRetrieval(t *testing.T) {
 	for _, entries := range listOfEntries {
 		for _, size := range sizes {
 			for _, dimentions := range []int{2} {
-				for _, n := range []int{12, 13, 14} {
+				for _, n := range []int{13, 14} {
 					//first we create a context for the PIR
 					if dimentions == 3 && n == 12 {
 						continue
 					}
-					context, err := settings.NewPirContext(entries, size, dimentions, n, 65537, 16)
+					context, err := settings.NewPirContext(entries, size, dimentions, n, 65537, 16, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -190,7 +248,7 @@ func TestClientRetrieval(t *testing.T) {
 					}
 					//we create a client with the new box and context, and a relinearization key to be given to the server
 					client := pir.NewPirClient(*context, *box)
-					rlk, err := client.GenRelinKey()
+
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -250,8 +308,12 @@ func TestClientRetrieval(t *testing.T) {
 					if DEBUG {
 						server.Box.Dec = client.Box.Dec
 					}
+					profile, err := client.GenProfile()
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
 					start = time.Now()
-					answerEnc, err := server.AnswerGen(ecdStorage, query, rlk, nil)
+					answerEnc, err := server.AnswerGen(ecdStorage, query, profile)
 					answerGenTime := time.Since(start).Seconds()
 
 					if err != nil {
@@ -311,7 +373,7 @@ func TestClientRetrievalWithObliviousExpansion(t *testing.T) {
 	//DB dimentions
 	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
 
-	listOfEntries := []int{1 << 10, 1 << 14, 1 << 16, 1 << 18, 1 << 20}
+	listOfEntries := []int{1 << 5, 1 << 14, 1 << 16, 1 << 18, 1 << 20}
 	sizes := []int{30 * 8, 188 * 8, 288 * 8}
 
 	os.Remove("data/pirGoOblivious.csv")
@@ -334,7 +396,7 @@ func TestClientRetrievalWithObliviousExpansion(t *testing.T) {
 					if dimentions == 3 && n == 12 {
 						continue
 					}
-					context, err := settings.NewPirContext(entries, size, dimentions, n, 65537, 16)
+					context, err := settings.NewPirContext(entries, size, dimentions, n, 65537, 16, true)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -345,8 +407,6 @@ func TestClientRetrievalWithObliviousExpansion(t *testing.T) {
 					}
 					//we create a client with the new box and context, and a relinearization key to be given to the server
 					client := pir.NewPirClient(*context, *box)
-					rlk, err := client.GenRelinKey()
-					rtks := client.GenRtKeys()
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -402,12 +462,17 @@ func TestClientRetrievalWithObliviousExpansion(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					//server creates the answer. Note we need to pass the relin key as well
+
 					if DEBUG {
 						server.Box.Dec = client.Box.Dec
 					}
+					profile, err := client.GenProfile()
+
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
 					start = time.Now()
-					answerEnc, err := server.AnswerGen(ecdStorage, query, rlk, rtks)
+					answerEnc, err := server.AnswerGen(ecdStorage, query, profile)
 					answerGenTime := time.Since(start).Seconds()
 
 					if err != nil {

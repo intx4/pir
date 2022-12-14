@@ -13,7 +13,20 @@ poly_modulus_degree             | max coeff_modulus bit-length
 var QI = map[int]map[int][]int{
 	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
 	2: {
-		4096:  []int{35, 60},
+		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
+		8192:  []int{35, 60},
+		16384: []int{35, 60},
+	},
+	3: {
+		8192:  []int{35, 60},
+		16384: []int{35, 60},
+	},
+}
+
+var QIforExp = map[int]map[int][]int{
+	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
+	2: {
+		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
 		8192:  []int{35, 60, 60},
 		16384: []int{35, 60, 60},
 	},
@@ -37,9 +50,17 @@ type HeBox struct {
 
 func NewHeBox(PC *PirContext) (*HeBox, error) {
 	//to do: add checks at some point to make sure that depth is aligned with levels
+	var qi map[int]map[int][]int
+	var pi []int = nil
+	if PC.Expansion == true {
+		qi = QIforExp
+	} else {
+		qi = QI
+	}
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
 		LogN: PC.N,
-		LogQ: QI[PC.Dimentions][1<<PC.N], //this is actually QP from the RNS BFV paper
+		LogQ: qi[PC.Dimentions][1<<PC.N], //this is actually QP from the RNS BFV paper
+		LogP: pi,
 		T:    uint64(65537),
 	})
 	if err != nil {
@@ -52,6 +73,10 @@ func NewHeBox(PC *PirContext) (*HeBox, error) {
 func (B *HeBox) WithKeys(sk *rlwe.SecretKey, pk *rlwe.PublicKey) {
 	B.Sk = sk
 	B.Pk = pk
+}
+
+func (B *HeBox) WithKey(sk *rlwe.SecretKey) {
+	B.Sk = sk
 }
 
 func (B *HeBox) GenRelinKey() (*rlwe.RelinearizationKey, error) {

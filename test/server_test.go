@@ -27,7 +27,7 @@ func TestServerEncode(t *testing.T) {
 				//we first create a context for the protocol, including info about the db size
 				//the dimentions we need to represent the db by (e.g 2 for matrix representation)
 				//the parameters of the BFV scheme (N,T and usable bits of T)
-				context, err := settings.NewPirContext(item, size, dimentions, 14, 65537, 16)
+				context, err := settings.NewPirContext(item, size, dimentions, 14, 65537, 16, false)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
@@ -96,7 +96,7 @@ func TestServerEntryManipulation(t *testing.T) {
 				//we first create a context for the protocol, including info about the db size
 				//the dimentions we need to represent the db by (e.g 2 for matrix representation)
 				//the parameters of the BFV scheme (N,T and usable bits of T)
-				context, err := settings.NewPirContext(item, size, dimentions, 14, 65537, 16)
+				context, err := settings.NewPirContext(item, size, dimentions, 14, 65537, 16, false)
 				if err != nil {
 					t.Fatalf(err.Error())
 				}
@@ -237,10 +237,10 @@ func TestObliviousExpansionBFVWithRetrieval(t *testing.T) {
 
 	ciphertexts := eval.Expand(ctIn, 2, logGap)
 	for _, c := range ciphertexts {
-		//	for _, p := range c.Value {
-		//		box.Params.RingQ().InvNTTLvl(c.Level(), p, p)
-		//	}
-		//	c.IsNTT = false
+		for _, p := range c.Value {
+			box.Params.RingQ().InvNTTLvl(c.Level(), p, p)
+		}
+		c.IsNTT = false
 		ShowCoeffs(c, box)
 	}
 	end := time.Since(start)
@@ -253,10 +253,10 @@ func TestObliviousExpansionBFVWithRetrieval(t *testing.T) {
 	ctIn.IsNTT = true
 	ciphertexts2 := eval.Expand(ctIn, 1, logGap)
 	for _, c := range ciphertexts2 {
-		//	for _, p := range c.Value {
-		//		box.Params.RingQ().InvNTTLvl(c.Level(), p, p)
-		//	}
-		//	c.IsNTT = false
+		for _, p := range c.Value {
+			box.Params.RingQ().InvNTTLvl(c.Level(), p, p)
+		}
+		c.IsNTT = false
 		ShowCoeffs(c, box)
 	}
 	//for _, c := range ciphertexts2 {
@@ -308,7 +308,7 @@ func TestObliviousExpansionBFVWithRetrieval(t *testing.T) {
 	fmt.Println("Time: ", end)
 
 	decR = box.Dec.DecryptNew(result2)
-	box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
+	//box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
 	resP = box.Ecd.DecodeUintNew(decR)
 	for i, r := range resP {
 		fmt.Println(data[2][i], r)
