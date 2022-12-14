@@ -98,39 +98,79 @@ func TestCompressionOfCt(t *testing.T) {
 		LogQ: settings.QI[2][1<<13],
 		T:    uint64(65537),
 	})
-	box := settings.HeBox{
-		Params: params,
-		Sk:     nil,
-		Pk:     nil,
-		Kgen:   bfv.NewKeyGenerator(params),
-		Ecd:    bfv.NewEncoder(params),
-		Enc:    nil,
-		Dec:    nil,
-		Evt:    nil,
-	}
-	sk := box.Kgen.GenSecretKey()
-	rand.Seed(123)
-	keyPRNG := make([]byte, 64)
-	rand.Read(keyPRNG)
-	prng, err := utils2.NewKeyedPRNG(keyPRNG)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	box.Enc = bfv.NewPRNGEncryptor(params, sk).WithPRNG(prng)
-	box.Ecd = bfv.NewEncoder(params)
-	box.Dec = bfv.NewDecryptor(params, sk)
-	ct := box.Enc.EncryptNew(box.Ecd.EncodeNew([]uint64{1, 2, 3}, params.MaxLevel()))
 
-	// c0 := ct.Value[0]
-	prng2, _ := utils2.NewKeyedPRNG(keyPRNG)
-	sampler := ringqp.NewUniformSampler(prng2, *params.RingQP())
-	ct2 := bfv.NewCiphertext(params, ct.Degree(), ct.Level())
-	sampler.ReadLvl(ct.Level(), -1, ringqp.Poly{Q: ct2.Value[1]})
-	ct2.MetaData = ct.MetaData
-	params.RingQ().InvNTTLvl(ct2.Level(), ct2.Value[1], ct2.Value[1])
-	//ct2.Value[1] = ct.Value[1]
-	ct2.Value[0] = ct.Value[0]
-	fmt.Println(box.Ecd.DecodeUintNew(box.Dec.DecryptNew(ct2)))
+	t.Run("encoding/slots", func(t *testing.T) {
+		box := settings.HeBox{
+			Params: params,
+			Sk:     nil,
+			Pk:     nil,
+			Kgen:   bfv.NewKeyGenerator(params),
+			Ecd:    bfv.NewEncoder(params),
+			Enc:    nil,
+			Dec:    nil,
+			Evt:    nil,
+		}
+		sk := box.Kgen.GenSecretKey()
+		rand.Seed(123)
+		keyPRNG := make([]byte, 64)
+		rand.Read(keyPRNG)
+		prng, err := utils2.NewKeyedPRNG(keyPRNG)
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+		box.Enc = bfv.NewPRNGEncryptor(params, sk).WithPRNG(prng)
+		box.Ecd = bfv.NewEncoder(params)
+		box.Dec = bfv.NewDecryptor(params, sk)
+		ct := box.Enc.EncryptNew(box.Ecd.EncodeNew([]uint64{1, 2, 3}, params.MaxLevel()))
+
+		// c0 := ct.Value[0]
+		prng2, _ := utils2.NewKeyedPRNG(keyPRNG)
+		sampler := ringqp.NewUniformSampler(prng2, *params.RingQP())
+		ct2 := bfv.NewCiphertext(params, ct.Degree(), ct.Level())
+		sampler.ReadLvl(ct.Level(), -1, ringqp.Poly{Q: ct2.Value[1]})
+		ct2.MetaData = ct.MetaData
+		params.RingQ().InvNTTLvl(ct2.Level(), ct2.Value[1], ct2.Value[1])
+		ct2.Value[0] = ct.Value[0]
+		fmt.Println(box.Ecd.DecodeUintNew(box.Dec.DecryptNew(ct2)))
+	})
+	t.Run("encoding/coeffs", func(t *testing.T) {
+		box := settings.HeBox{
+			Params: params,
+			Sk:     nil,
+			Pk:     nil,
+			Kgen:   bfv.NewKeyGenerator(params),
+			Ecd:    bfv.NewEncoder(params),
+			Enc:    nil,
+			Dec:    nil,
+			Evt:    nil,
+		}
+		sk := box.Kgen.GenSecretKey()
+		rand.Seed(123)
+		keyPRNG := make([]byte, 64)
+		rand.Read(keyPRNG)
+		prng, err := utils2.NewKeyedPRNG(keyPRNG)
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+		box.Enc = bfv.NewPRNGEncryptor(params, sk).WithPRNG(prng)
+		box.Ecd = bfv.NewEncoder(params)
+		box.Dec = bfv.NewDecryptor(params, sk)
+		ct := box.Enc.EncryptNew(utils.EncodeCoeffs(box.Ecd, params, []uint64{1, 2, 3}))
+		//prng2, _ := utils2.NewKeyedPRNG(keyPRNG)
+		//sampler := ringqp.NewUniformSampler(prng2, *params.RingQP())
+		//ct2 := bfv.NewCiphertext(params, ct.Degree(), ct.Level())
+		//sampler.ReadLvl(ct.Level(), -1, ringqp.Poly{Q: ct2.Value[1]})
+		//ct2.MetaData = ct.MetaData
+		//ct2.Value[0] = ct.Value[0]
+		sampler, _ := pir.NewSampler(123, box.Params)
+
+		// |
+		// v to make this work, comment out the InvNTT in DecompressCT in case *rlwe.Ciphertext
+
+		ct2, _ := pir.DecompressCT(pir.CompressCT(ct), *sampler, box.Params)
+		utils.ShowCoeffs(ct2.(*rlwe.Ciphertext), box)
+	})
+
 }
 
 /*

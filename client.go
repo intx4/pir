@@ -9,7 +9,6 @@ import (
 	"math/rand"
 	"pir/settings"
 	"pir/utils"
-	"sync"
 )
 
 type PIRClient struct {
@@ -97,20 +96,6 @@ func (PC *PIRClient) QueryGen(key []byte) ([][]*PIRQueryCt, error) {
 	return query, nil
 }
 
-// Encodes d = [d0,d1,...,dn-1] as pt = d0 + d1X + ...dn-1X^n-1 and returns pt in NTT form
-func EncodeCoeffs(ecd bfv.Encoder, params bfv.Parameters, coeffs []uint64) *rlwe.Plaintext {
-	ptRt := bfv.NewPlaintextRingT(params)
-
-	copy(ptRt.Value.Coeffs[0], coeffs)
-
-	pt := bfv.NewPlaintext(params, params.MaxLevel())
-	ecd.ScaleUp(ptRt, pt)
-
-	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
-	pt.IsNTT = true
-	return pt
-}
-
 func (PC *PIRClient) CompressedQueryGen(key []byte) ([]*PIRQueryCt, error) {
 	if PC.Box.Ecd == nil || PC.Box.Enc == nil {
 		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
@@ -143,16 +128,13 @@ func (PC *PIRClient) CompressedQueryGen(key []byte) ([]*PIRQueryCt, error) {
 	//	}
 	//}
 	query := make([]*PIRQueryCt, PC.Context.Dimentions)
-	var wg sync.WaitGroup
+	enc := PC.Box.Enc
+	ecd := PC.Box.Ecd
+
 	for i := range query {
-		wg.Add(1)
-		go func(i int, ecd bfv.Encoder, enc rlwe.Encryptor) {
-			defer wg.Done()
-			ct := enc.EncryptNew(EncodeCoeffs(ecd, PC.Box.Params, selectors[i]))
-			query[i] = CompressCT(ct)
-		}(i, PC.Box.Ecd.ShallowCopy(), PC.Box.Enc.ShallowCopy())
+		ct := enc.EncryptNew(utils.EncodeCoeffs(ecd, PC.Box.Params, selectors[i]))
+		query[i] = CompressCT(ct)
 	}
-	wg.Wait()
 	return query, nil
 }
 

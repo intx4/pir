@@ -60,7 +60,8 @@ func DecompressCT(compressedCTs interface{}, sampler ringqp.UniformSampler, para
 		for i, compressed := range compressedCTs.([]*PIRQueryCt) {
 			ct := bfv.NewCiphertext(params, compressed.Deg, compressed.Lvl)
 			sampler.ReadLvl(compressed.Lvl, -1, ringqp.Poly{Q: ct.Value[1]})
-			params.RingQ().InvNTTLvl(compressed.Lvl, ct.Value[1], ct.Value[1])
+			//skip InvNTT as NTT it's needed for Expand
+			//params.RingQ().InvNTTLvl(compressed.Lvl, ct.Value[1], ct.Value[1])
 			ct.MetaData = compressed.Meta
 			ct.Value[0] = compressed.C0
 			decompressed[i] = ct

@@ -214,6 +214,20 @@ func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
 	return coords[:len(coords)-1], coordsAsInt
 }
 
+// Encodes d = [d0,d1,...,dn-1] as pt = d0 + d1X + ...dn-1X^n-1 and returns pt in NTT form
+func EncodeCoeffs(ecd bfv.Encoder, params bfv.Parameters, coeffs []uint64) *rlwe.Plaintext {
+	ptRt := bfv.NewPlaintextRingT(params)
+
+	copy(ptRt.Value.Coeffs[0], coeffs)
+
+	pt := bfv.NewPlaintext(params, params.MaxLevel())
+	ecd.ScaleUp(ptRt, pt)
+
+	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
+	pt.IsNTT = true
+	return pt
+}
+
 func ShowCoeffs(ct *rlwe.Ciphertext, box settings.HeBox) {
 	decR := box.Dec.DecryptNew(ct)
 	ptRt := bfv.NewPlaintextRingT(box.Params)
