@@ -31,6 +31,16 @@ type PIRQueryCt struct {
 	Deg  int           `json:"deg,omitempty"`
 }
 
+type PIRQuery struct {
+	Q          interface{} `json:"q,omitempty"`
+	Seed       int64       `json:"seed,omitempty"`
+	K          int         `json:"k,omitempty"`
+	Dimentions int         `json:"dimentions,omitempty"`
+	Kd         int         `json:"kd,omitempty"`
+	Ks         []string    `json:"ks,omitempty"`
+	Id         string      `json:"id,omitempty"`
+}
+
 func (PQ *PIRQueryCt) MarshalBinary() ([]byte, error) {
 	b, err := json.Marshal(PQ)
 	if err != nil {
@@ -52,7 +62,8 @@ func CompressCT(ct *rlwe.Ciphertext) *PIRQueryCt {
 	}
 }
 
-// Decompress CT by sampling the random polynomial from seed
+// Decompress CT by sampling the random polynomial from seed. compressedCts can be a single PIRQueryCt, an array or list of arrays
+// Returns respectively a single *rlwe.Ciphertext, an array or a list of array
 func DecompressCT(compressedCTs interface{}, sampler ringqp.UniformSampler, params bfv.Parameters) (interface{}, error) {
 	switch compressedCTs.(type) {
 	case []*PIRQueryCt:

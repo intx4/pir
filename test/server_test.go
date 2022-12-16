@@ -1,20 +1,6 @@
 package test
 
-import (
-	"bytes"
-	"fmt"
-	"github.com/stretchr/testify/require"
-	"github.com/tuneinsight/lattigo/v4/bfv"
-	"github.com/tuneinsight/lattigo/v4/rgsw"
-	"github.com/tuneinsight/lattigo/v4/rlwe"
-	"math"
-	"pir"
-	"pir/settings"
-	"pir/utils"
-	"testing"
-	"time"
-)
-
+/*
 // This test takes time
 func TestServerEncode(t *testing.T) {
 	//various settings for the db size
@@ -149,32 +135,6 @@ func TestServerEntryManipulation(t *testing.T) {
 	}
 }
 
-func EncodeCoeffs(ecd bfv.Encoder, params bfv.Parameters, coeffs []uint64) *rlwe.Plaintext {
-	ptRt := bfv.NewPlaintextRingT(params)
-
-	copy(ptRt.Value.Coeffs[0], coeffs)
-	//params.RingT().NTTLvl(ptRt.Level(), ptRt.Plaintext.Value, ptRt.Plaintext.Value)
-	//ptRt.IsNTT = true
-	pt := bfv.NewPlaintext(params, params.MaxLevel())
-	ecd.ScaleUp(ptRt, pt)
-	//
-	//	params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
-	//	pt.IsNTT = true
-	return pt
-}
-
-func ShowCoeffs(ct *rlwe.Ciphertext, box settings.HeBox) {
-	decR := box.Dec.DecryptNew(ct)
-	ptRt := bfv.NewPlaintextRingT(box.Params)
-
-	if decR.IsNTT {
-		fmt.Println("NTT")
-		box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
-	}
-	box.Ecd.ScaleDown(decR, ptRt)
-	fmt.Println(ptRt.Value.Coeffs[0])
-}
-
 type HeBox struct {
 	Params bfv.Parameters
 	Sk     *rlwe.SecretKey
@@ -186,6 +146,94 @@ type HeBox struct {
 	Evt    bfv.Evaluator
 }
 
+func EncodeCoeffs(ecd bfv.Encoder, params bfv.Parameters, coeffs []uint64) *rlwe.Plaintext {
+	ptRt := bfv.NewPlaintextRingT(params)
+
+	copy(ptRt.Value.Coeffs[0], coeffs)
+	pt := bfv.NewPlaintext(params, params.MaxLevel())
+	ecd.ScaleUp(ptRt, pt)
+
+	//uncomment to fix test
+		//params.RingQ().NTTLvl(pt.Level(), pt.Value, pt.Value)
+		//pt.IsNTT = true
+	return pt
+}
+
+func ShowCoeffs(ct *rlwe.Ciphertext, box HeBox) []uint64{
+	decR := box.Dec.DecryptNew(ct)
+	ptRt := bfv.NewPlaintextRingT(box.Params)
+
+	if decR.IsNTT {
+		fmt.Println("NTT")
+		box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
+	}
+	box.Ecd.ScaleDown(decR, ptRt)
+	fmt.Println(ptRt.Value.Coeffs[0])
+	return ptRt.Value.Coeffs[0]
+}
+
+
+func TestExpandNTTIssue(t *testing.T) {
+
+	params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
+		LogN: 12,
+		LogQ: []int{35, 35, 35},
+		T:    uint64(65537),
+	})
+
+	box := HeBox{
+		Params: params,
+		Sk:     nil,
+		Pk:     nil,
+		Kgen:   bfv.NewKeyGenerator(params),
+		Ecd:    bfv.NewEncoder(params),
+		Enc:    nil,
+		Dec:    nil,
+		Evt:    nil,
+	}
+	sk, pk := box.Kgen.GenKeyPair()
+	box.Sk = sk
+	box.Pk = pk
+	rlk := box.Kgen.GenRelinearizationKey(box.Sk, 3)
+	box.Evt = bfv.NewEvaluator(params, rlwe.EvaluationKey{Rlk: rlk})
+	box.Enc = bfv.NewEncryptor(params, sk)
+	box.Dec = bfv.NewDecryptor(params, sk)
+	logN := params.LogN()
+	logGap := 0
+
+	idx := 2
+	// [0 0 1 0 ... 0]
+	values := make([]uint64, params.N())
+	values[idx] = 1
+
+	// Rotation Keys
+	galEls := params.GaloisElementForExpand(logN)
+	rtks := box.Kgen.GenRotationKeys(galEls, sk)
+
+	pt := EncodeCoeffs(box.Ecd, box.Params, values) //X^2
+	ctIn := box.Enc.EncryptNew(pt) // enc (X^2)
+
+	eval := rlwe.NewEvaluator(box.Params.Parameters, &rlwe.EvaluationKey{Rtks: rtks})
+
+	ciphertexts := eval.Expand(ctIn, 10, logGap) //1024 cts
+	for i, c := range ciphertexts {
+		coeffs := ShowCoeffs(c, box)
+		if i != idx{
+			for _, coeff := range coeffs{
+				require.Equal(t, uint64(0), coeff)
+			}
+		}else{
+			for j,coeff := range coeffs{
+				if j == 0{
+					require.Equal(t, uint64(1), coeff)
+				}else{
+					require.Equal(t, uint64(0), coeff)
+				}
+			}
+		}
+	}
+}
+
 func TestObliviousExpansionBFVWithRetrieval(t *testing.T) {
 	params, _ := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
 		LogN: 12,
@@ -193,7 +241,7 @@ func TestObliviousExpansionBFVWithRetrieval(t *testing.T) {
 		T:    uint64(65537),
 	})
 
-	box := settings.HeBox{
+	box := HeBox{
 		Params: params,
 		Sk:     nil,
 		Pk:     nil,
@@ -315,6 +363,8 @@ func TestObliviousExpansionBFVWithRetrieval(t *testing.T) {
 		require.Equal(t, data[2][i], r)
 	}
 }
+
+
 
 func TestObliiviousExpansionRLWE(t *testing.T) {
 	params, _ := rlwe.NewParametersFromLiteral(rlwe.TestPN13QP218)
@@ -450,3 +500,4 @@ func TestObliiviousExpansionRGSW(t *testing.T) {
 		}
 	}
 }
+*/

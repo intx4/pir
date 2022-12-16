@@ -3,36 +3,20 @@ package settings
 import (
 	"errors"
 	"github.com/davidkleiven/gononlin/nonlin"
+	"github.com/tuneinsight/lattigo/v4/bfv"
 	"math"
 )
 
-/*
-Represents a context for the PIR scheme:
-
-	DBItems : num of items in db
-	DBSize : size of one item in db in bits (assumes the same for all)
-	Dimentions : num dimentions of the hypercube
-	N : Ring Degree for BFV in bits
-	T : Plaintext Modulus for BFV in bits
-	tUsable : Actual Plaintext Modulus to avoid overflow in bits
-	MaxBinSize : num of db values that can be stored in one entry of the hypercube
-	K : key space of the hypercube
-	Kd : dimention size of the hypercube, i.e dth-root of K
-*/
+// Represents a context for the PIR scheme:
 type PirContext struct {
-	DBItems         int
-	DBSize          int
-	Dimentions      int
-	N               int
-	T               int
-	TUsable         int
-	MaxBinSize      int
-	ExpectedBinSize int
-	K               int
-	Kd              int
-	Expansion       bool
+	DBItems         int `json:"db_items,omitempty"`
+	DBSize          int `json:"db_size,omitempty"`
+	MaxBinSize      int `json:"max_bin_size,omitempty"`
+	ExpectedBinSize int `json:"expected_bin_size,omitempty"`
+	PackedSize      int `json:"packed_size,omitempty"`
 }
 
+// used for estimating bin size from https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 var genF = func(c float64) func(x float64) float64 {
 	return func(x float64) float64 {
 		return 1.0 + x*(math.Log(c)-math.Log(x)+1.0) - c
@@ -49,15 +33,14 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 	}
 
 }
-func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable int, expansion bool) (*PirContext, error) {
-	if Dimentions < 0 || Dimentions > 3 {
-		return nil, errors.New("Hypercube dimention can be 0 to 3")
-	}
-	PC := &PirContext{DBItems: Items, DBSize: Size, Dimentions: Dimentions, N: N, T: T, TUsable: tUsable, MaxBinSize: int(math.Floor((float64(tUsable) * math.Pow(2, float64(N))) / float64(Size))), Expansion: expansion}
+
+// Takes as input number of items in DB, bit size of items, and params
+func NewPirContext(Items int, Size int, params bfv.Parameters) (*PirContext, error) {
+	ctx := &PirContext{DBItems: Items, DBSize: Size, MaxBinSize: int(math.Floor(float64(TUsableBits*(1<<params.LogN())) / float64(Size)))}
 
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := math.E
-	exp := float64(Dimentions)
+	exp := 2.0
 	maxIter := 1000
 	for maxIter > 0 {
 		K := math.Pow(base, exp)
@@ -83,16 +66,17 @@ func NewPirContext(Items int, Size int, Dimentions int, N int, T int, tUsable in
 				break
 			}
 		}
-		if math.Ceil((dc+1)*math.Log(K)) < float64(PC.MaxBinSize)*1.01 && dc != 0.0 {
-			PC.ExpectedBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
-			PC.K, PC.Kd = RoundUpToDim(K, Dimentions)
+		if math.Ceil((dc+1)*math.Log(K)) < float64(ctx.MaxBinSize)*1.01 && dc != 0.0 {
+			ctx.ExpectedBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
+			//PC.K, PC.Kd = RoundUpToDim(K, Dimentions)
+			ctx.PackedSize = int(math.Ceil(K))
 			break
 		}
 		maxIter--
 		exp += .1
 	}
-	if PC.K == 0 {
+	if ctx.PackedSize == 0 {
 		return nil, errors.New("Could not estimate probabilistic bin size")
 	}
-	return PC, nil
+	return ctx, nil
 }

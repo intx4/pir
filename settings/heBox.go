@@ -6,6 +6,9 @@ import (
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 )
 
+var T = uint64(65537)
+var TUsableBits = 16
+
 /*
 poly_modulus_degree             | max coeff_modulus bit-length
 1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
@@ -48,20 +51,20 @@ type HeBox struct {
 	Evt    bfv.Evaluator
 }
 
-func NewHeBox(PC *PirContext) (*HeBox, error) {
+func NewHeBox(logN, dimentions int, expansion bool) (*HeBox, error) {
 	//to do: add checks at some point to make sure that depth is aligned with levels
 	var qi map[int]map[int][]int
 	var pi []int = nil
-	if PC.Expansion == true {
+	if expansion == true {
 		qi = QIforExp
 	} else {
 		qi = QI
 	}
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
-		LogN: PC.N,
-		LogQ: qi[PC.Dimentions][1<<PC.N], //this is actually QP from the RNS BFV paper
+		LogN: logN,
+		LogQ: qi[dimentions][1<<logN], //this is actually QP from the RNS BFV paper
 		LogP: pi,
-		T:    uint64(65537),
+		T:    T,
 	})
 	if err != nil {
 		return nil, err

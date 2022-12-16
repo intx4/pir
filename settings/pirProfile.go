@@ -6,12 +6,8 @@ import "github.com/tuneinsight/lattigo/v4/rlwe"
 type PIRProfile struct {
 	Rlk  *rlwe.RelinearizationKey
 	Rtks *rlwe.RotationKeySet
-	Seed int64 //feed to PRNG
-}
-
-func NewPirProfile(rlk *rlwe.RelinearizationKey, rtks *rlwe.RotationKeySet) PIRProfile {
-	return PIRProfile{
-		Rlk:  rlk,
-		Rtks: rtks,
-	}
+	LogN int
+	Q    []uint64
+	P    []uint64
+	Id   string
 }

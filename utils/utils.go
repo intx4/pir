@@ -15,11 +15,27 @@ import (
 var PAD_PREFIX string = "1011101"
 var VALUE_SEPARATOR string = "|"
 
-func Min(a, b int) int {
+func IsIn(a interface{}, v interface{}) bool {
+	for i := range a.([]interface{}) {
+		if a.([]interface{})[i] == v {
+			return true
+		}
+	}
+	return false
+}
+
+func Min(a, b float64) float64 {
 	if a >= b {
 		return b
 	}
 	return a
+}
+
+func Max(a, b float64) float64 {
+	if a >= b {
+		return a
+	}
+	return b
 }
 
 // Converts b to binary representation
@@ -196,11 +212,11 @@ func Unchunkify(chunks []uint64, tBits int) ([]byte, error) {
 }
 
 // Maps a key to a list of dimentions integers, each in [0,dimSize), as string idx1|...|idxdimentions
-func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
+func MapKeyToDim(key []byte, dimSize int, dimentions int) (string, []int) {
 	h1 := md5.New()
 
 	coords := ""
-	coordsAsInt := make([]int, dimentions)
+	coordsV := make([]int, dimentions)
 	for i := 0; i < dimentions; i++ {
 		h1.Write(key)
 		h1.Write([]byte{byte(i)})
@@ -208,10 +224,36 @@ func MapKeyToIdx(key []byte, dimSize int, dimentions int) (string, []int) {
 		x := new(big.Int).SetBytes(d1)
 		x.Mod(x, new(big.Int).SetInt64(int64(dimSize)))
 		coords += x.Text(10) + VALUE_SEPARATOR
-		coordsAsInt[i] = int(x.Int64())
+		coordsV[i] = int(x.Int64())
 		h1.Reset()
 	}
-	return coords[:len(coords)-1], coordsAsInt
+	return coords[:len(coords)-1], coordsV
+}
+
+// Maps idx in 0...K, K = dimdize^dimentions, to a decomposition of idx in base dimsize
+func MapIdxToDim(idx int, dimSize int, dimentions int) (string, []int) {
+	coordsV := make([]int, dimentions)
+	coords := ""
+	j := 0
+	for i := dimentions - 1; i > 0; i-- {
+		coordsV[j] = idx / int(math.Pow(float64(dimSize), float64(i)))
+		coords += strconv.FormatInt(int64(coordsV[j]), 10) + VALUE_SEPARATOR
+		idx = idx % int(math.Pow(float64(dimSize), float64(i)))
+	}
+	return coords, coordsV
+}
+
+// Recursive function to generate keys at depth nextdepth = currdepth+1 (depth is a dimention)
+// totDepth then represents the number of dimentions
+// dim is the value of a single dimention
+func GenKeysAtDepth(di string, nextDepth, totDepth, dim int, keys *[]string) {
+	if nextDepth == totDepth {
+		*keys = append(*keys, di)
+	} else {
+		for dj := 0; dj < dim; dj++ {
+			GenKeysAtDepth(di+"|"+strconv.FormatInt(int64(dj), 10), nextDepth+1, totDepth, dim, keys)
+		}
+	}
 }
 
 // Encodes d = [d0,d1,...,dn-1] as pt = d0 + d1X + ...dn-1X^n-1 and returns pt in NTT form
