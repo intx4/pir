@@ -124,15 +124,15 @@ func Chunkify(b []byte, chunkSize int) ([]uint64, error) {
 }
 
 // Encodes chunks as a list of Plaintexts in NTT form
-func EncodeChunks(chunks []uint64, box settings.HeBox) []rlwe.Operand {
-	numPts := int(math.Ceil(float64(len(chunks)) / float64(box.Params.N())))
+func EncodeChunks(chunks []uint64, ecd bfv.Encoder, params bfv.Parameters) []rlwe.Operand {
+	numPts := int(math.Ceil(float64(len(chunks)) / float64(params.N())))
 	pts := make([]rlwe.Operand, numPts)
 	pti := 0
-	for i := 0; i < len(chunks); i = i + box.Params.N() {
-		if i+box.Params.N() >= len(chunks) {
-			pts[pti] = box.Ecd.EncodeMulNew(chunks[i:], box.Params.MaxLevel())
+	for i := 0; i < len(chunks); i = i + params.N() {
+		if i+params.N() >= len(chunks) {
+			pts[pti] = ecd.EncodeMulNew(chunks[i:], params.MaxLevel())
 		} else {
-			pts[pti] = box.Ecd.EncodeMulNew(chunks[i:i+box.Params.N()], box.Params.MaxLevel())
+			pts[pti] = ecd.EncodeMulNew(chunks[i:i+params.N()], params.MaxLevel())
 		}
 		pti++
 	}

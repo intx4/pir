@@ -9,5 +9,5 @@ type PIRProfile struct {
 	LogN int
 	Q    []uint64
 	P    []uint64
-	Id   string
+	Id   int
 }

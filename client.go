@@ -14,10 +14,10 @@ import (
 type PIRClient struct {
 	Box     *settings.HeBox
 	DiffObl *DiffOblModule
-	id      string
+	id      int
 }
 
-func NewPirClient(b *settings.HeBox, id string) *PIRClient {
+func NewPirClient(b *settings.HeBox, id int) *PIRClient {
 	client := new(PIRClient)
 	client.Box = b
 	client.Box.WithKeyGenerator(bfv.NewKeyGenerator(b.Params))

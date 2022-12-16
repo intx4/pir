@@ -69,7 +69,7 @@ func NewHeBox(logN, dimentions int, expansion bool) (*HeBox, error) {
 	if err != nil {
 		return nil, err
 	}
-	box := &HeBox{Params: params, Ecd: bfv.NewEncoder(params)}
+	box := &HeBox{Params: params}
 	return box, nil
 }
 
