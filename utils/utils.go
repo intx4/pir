@@ -12,7 +12,7 @@ import (
 	"strconv"
 )
 
-var PAD_PREFIX string = "1011101"
+var PAD_PREFIX string = "10011111001"
 var VALUE_SEPARATOR string = "|"
 
 func IsIn(a interface{}, v interface{}) bool {

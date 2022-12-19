@@ -36,7 +36,7 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 
 // Takes as input number of items in DB, bit size of items, and params
 func NewPirContext(Items int, Size int, params bfv.Parameters) (*PirContext, error) {
-	ctx := &PirContext{DBItems: Items, DBSize: Size, MaxBinSize: int(math.Floor(float64(TUsableBits*(1<<params.LogN())) / float64(Size)))}
+	ctx := &PirContext{DBItems: Items, DBSize: Size, MaxBinSize: int(math.Floor(float64(TUsableBits*(1<<params.LogN())-2) / float64(Size+8)))} //-2 for padding and length, +8 is 1 byte for separator "|"
 
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := math.E
