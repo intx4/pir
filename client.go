@@ -2,13 +2,21 @@ package pir
 
 import (
 	"errors"
+	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	utils2 "github.com/tuneinsight/lattigo/v4/utils"
 	"log"
+	"math"
 	"math/rand"
 	"pir/settings"
 	"pir/utils"
+)
+
+const (
+	NONE int = iota
+	STANDARD
+	HIGH
 )
 
 type PIRClient struct {
@@ -29,15 +37,6 @@ func NewPirClient(b *settings.HeBox, id int) *PIRClient {
 	return client
 }
 
-func (PC *PIRClient) WithDifferentialOblviousness(eps float64, delta float64, n int) error {
-	if eps <= 1e-9 {
-		return errors.New("Privacy budget too low")
-	}
-	PC.DiffObl = NewDOModule(DBSizeUpperBound, eps, delta, n)
-	log.Print("Sampling noise...")
-	PC.DiffObl.GenDPHistogram()
-	return nil
-}
 func (PC *PIRClient) genRelinKey() (*rlwe.RelinearizationKey, error) {
 	return PC.Box.GenRelinKey()
 }
@@ -57,10 +56,12 @@ func (PC *PIRClient) GenProfile() (*settings.PIRProfile, error) {
 	return &settings.PIRProfile{
 		Rlk:  rlk,
 		Rtks: rtks,
-		LogN: PC.Box.Params.LogN(),
-		Q:    PC.Box.Params.Q(),
-		P:    PC.Box.Params.P(),
-		Id:   PC.id,
+		Params: []settings.PIRCryptoParams{settings.PIRCryptoParams{
+			LogN: PC.Box.Params.LogN(),
+			Q:    PC.Box.Params.Q(),
+			P:    PC.Box.Params.P(),
+		}},
+		Id: PC.id,
 	}, nil
 }
 
@@ -71,7 +72,7 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, dimentions int, differentialOblivious, compressed bool) (*PIRQuery, error) {
+func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, leakage int, weaklyPrivate, compressed bool) (*PIRQuery, error) {
 	//new seeded prng
 	seed := rand.Int63n(int64(1<<63 - 1))
 	rand.Seed(seed)
@@ -85,27 +86,47 @@ func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, dimentions i
 	q := new(PIRQuery)
 	q.Id = PC.id
 	q.Seed = seed
-	q.Dimentions = dimentions
-
-	if !differentialOblivious {
-		K, Kd := settings.RoundUpToDim(float64(ctx.PackedSize), dimentions)
-		q.K = K
-		q.Kd = Kd
+	q.Dimentions = ctx.Dimentions
+	q.K = ctx.K
+	q.Kd = ctx.Kd
+	if !weaklyPrivate {
 		if compressed {
-			q.Q, err = PC.compressedQueryGen(key, Kd, dimentions)
+			q.Q, err = PC.compressedQueryGen(key, q.Kd, q.Dimentions)
 		} else {
-			q.Q, err = PC.queryGen(key, Kd, dimentions)
+			q.Q, err = PC.queryGen(key, q.Kd, q.Dimentions)
 		}
 	} else {
-		if PC.DiffObl == nil {
-			return nil, errors.New("Differential Obliviousness module not initialized")
-		}
 		if compressed == false {
-			return nil, errors.New("DO queries are not supported without compression")
+			return nil, errors.New("WPIR queries are not supported without compression")
 		}
-		q.Q, q.Ks, err = PC.dpQueryGen(key, ctx.PackedSize, dimentions)
-		q.K, q.Kd = settings.RoundUpToDim(float64(len(q.Ks)), dimentions)
-		q.Dimentions = dimentions
+		if leakage == NONE {
+			return nil, errors.New("NONE leakage is supported only if not weakly private query")
+		}
+		TotBitsLeak := math.Log2(float64(ctx.K))
+		PartitionBitsLeak := math.Log2(float64(ctx.Kd))
+		dimToSkip := 0
+		leaked := 0.0
+		if leakage == STANDARD {
+			for leaked <= TotBitsLeak/2 {
+				if leaked+PartitionBitsLeak <= TotBitsLeak/2 {
+					leaked += PartitionBitsLeak
+					dimToSkip++
+				} else {
+					break
+				}
+			}
+		} else if leakage == HIGH {
+			for leaked <= TotBitsLeak/3 {
+				if leaked+PartitionBitsLeak <= TotBitsLeak/3 {
+					leaked += PartitionBitsLeak
+					dimToSkip++
+				} else {
+					break
+				}
+			}
+		}
+		log.Println(fmt.Sprintf("WPIR: Leaking %f / %f", leaked, TotBitsLeak))
+		q.Q, err = PC.wpQueryGen(key, q.Kd, q.Dimentions, dimToSkip)
 	}
 	return q, err
 }
@@ -117,14 +138,14 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) queryGen(key []byte, Kd, dimentions int) ([][]*PIRQueryCt, error) {
+func (PC *PIRClient) queryGen(key []byte, Kd, dimentions int) ([][]*PIRQueryItem, error) {
 	if PC.Box.Ecd == nil || PC.Box.Enc == nil {
 		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
 	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
-	query := make([][]*PIRQueryCt, dimentions)
+	query := make([][]*PIRQueryItem, dimentions)
 	for i, k := range keys {
-		queryOfDim := make([]*PIRQueryCt, Kd)
+		queryOfDim := make([]*PIRQueryItem, Kd)
 		for d := 0; d < Kd; d++ {
 			c := &rlwe.Ciphertext{}
 			if d == k {
@@ -145,7 +166,7 @@ func (PC *PIRClient) queryGen(key []byte, Kd, dimentions int) ([][]*PIRQueryCt, 
 	return query, nil
 }
 
-func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int) ([]*PIRQueryCt, error) {
+func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int) ([]*PIRQueryItem, error) {
 	if PC.Box.Ecd == nil || PC.Box.Enc == nil {
 		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
@@ -159,7 +180,7 @@ func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int) ([]*PIRQ
 		selectors[i][k] = 1
 	}
 
-	query := make([]*PIRQueryCt, dimentions)
+	query := make([]*PIRQueryItem, dimentions)
 	enc := PC.Box.Enc
 	ecd := PC.Box.Ecd
 
@@ -185,59 +206,34 @@ func (PC *PIRClient) AnswerGet(answer []*rlwe.Ciphertext) ([]byte, error) {
 }
 
 // |
-// | DP PIR
+// | W PIR
 // v
 
-// Given a key, returns an array of noisy keys (including target) and the index of the target key among the noisy keys
-func (PC *PIRClient) genNoisyKeys(DBSize, dimentions int, key []byte) ([]string, error) {
-	if PC.DiffObl == nil {
-		return nil, errors.New("Differential Obliviousness module not initialiazed")
+func (PC *PIRClient) wpQueryGen(key []byte, Kd, dimentions, dimToSkip int) ([]*PIRQueryItem, error) {
+	if PC.Box.Ecd == nil || PC.Box.Enc == nil {
+		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
-	if PC.DiffObl.DBSize < DBSize {
-		PC.DiffObl.DBSize = DBSize
-		PC.DiffObl.GenDPHistogram()
+	//l := int(math.Ceil(float64(PC.Context.K) / float64(PC.Box.Params.N())))
+	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
+	selectors := make([][]uint64, dimentions-dimToSkip)
+
+	//gen selection vectors
+	for i, k := range keys[dimToSkip:] {
+		selectors[i] = make([]uint64, Kd)
+		selectors[i][k] = 1
 	}
-	h := PC.DiffObl.H
-	_, keyIdx := utils.MapKeyToDim(key, DBSize, 1)
-	targetIdx := keyIdx[0]
-	N := h[targetIdx]
-	_, Kd := settings.RoundUpToDim(float64(N+1), dimentions)
-	if Kd > PC.Box.Params.N() {
-		return nil, errors.New("The number of noisy keys generated is too high. Try lower epsilon or delta or n")
-	}
-	noisyIdx := make([]int, N+1)
-	i := 0
-	for i < N {
-		k := rand.Int63n(int64(DBSize))
-		if k != int64(targetIdx) {
-			noisyIdx[i] = int(k)
-			i++
+
+	query := make([]*PIRQueryItem, dimentions)
+	enc := PC.Box.Enc
+	ecd := PC.Box.Ecd
+
+	for i := range query {
+		if i < dimToSkip {
+			query[i] = &PIRQueryItem{isPlain: true, Idx: keys[i]}
+		} else {
+			ct := enc.EncryptNew(utils.EncodeCoeffs(ecd, PC.Box.Params, selectors[i-dimToSkip]))
+			query[i] = CompressCT(ct)
 		}
 	}
-	//add target idx to list of noisy idx
-	noisyIdx[len(noisyIdx)-1] = targetIdx
-	//transform idx in keys given the dimentions
-	noisyKeys := make([]string, len(noisyIdx))
-	for i, j := range noisyIdx {
-		noisyKeys[i], _ = utils.MapIdxToDim(j, Kd, dimentions)
-	}
-	//randomly permute the keys
-	rand.Shuffle(len(noisyKeys), func(i, j int) {
-		noisyKeys[i], noisyKeys[j] = noisyKeys[j], noisyKeys[i]
-	})
-	return noisyKeys, nil
-}
-
-func (PC *PIRClient) dpQueryGen(key []byte, DBSize, dimentions int) ([]*PIRQueryCt, []string, error) {
-	Ks, err := PC.genNoisyKeys(DBSize, dimentions, key)
-	if err != nil {
-		return nil, nil, err
-	}
-	_, Kd := settings.RoundUpToDim(float64(len(Ks)), dimentions)
-	Q, err := PC.compressedQueryGen(key, Kd, dimentions)
-	if err != nil {
-		return nil, nil, err
-	}
-	return Q, Ks, nil
-
+	return query, nil
 }

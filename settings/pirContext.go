@@ -13,7 +13,11 @@ type PirContext struct {
 	DBSize          int `json:"db_size,omitempty"`
 	MaxBinSize      int `json:"max_bin_size,omitempty"`
 	ExpectedBinSize int `json:"expected_bin_size,omitempty"`
-	PackedSize      int `json:"packed_size,omitempty"`
+	PackedDBSize    int `json:"packed_db_size"`
+	K               int `json:"k,omitempty"`
+	Kd              int `json:"kd,omitempty"`
+	Dimentions      int `json:"dimentions,omitempty"`
+	LogN            int `json:"log_n,omitempty"`
 }
 
 // used for estimating bin size from https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
@@ -31,7 +35,6 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 	} else {
 		return int(math.Floor(math.Pow(Kd+1, float64(Dim)))), int(Kd + 1)
 	}
-
 }
 
 // Takes as input number of items in DB, bit size of items, and params
@@ -67,16 +70,24 @@ func NewPirContext(Items int, Size int, params bfv.Parameters) (*PirContext, err
 			}
 		}
 		if math.Ceil((dc+1)*math.Log(K)) < float64(ctx.MaxBinSize)*1.01 && dc != 0.0 {
-			ctx.ExpectedBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
-			//PC.K, PC.Kd = RoundUpToDim(K, Dimentions)
-			ctx.PackedSize = int(math.Ceil(K))
+			//find the most convenient dimention
+			for dimentions := 1; dimentions < 4; dimentions++ {
+				_, ctx.Kd = RoundUpToDim(K, dimentions)
+				if ctx.Kd < params.N() {
+					ctx.ExpectedBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
+					ctx.PackedDBSize = int(math.Ceil(K))
+					ctx.K = int(math.Pow(float64(ctx.Kd), float64(dimentions)))
+					ctx.Dimentions = dimentions
+					break
+				}
+			}
 			break
 		}
 		maxIter--
 		exp += .1
 	}
-	if ctx.PackedSize == 0 {
-		return nil, errors.New("Could not estimate probabilistic bin size")
+	if ctx.K == 0 {
+		return nil, errors.New("Could not estimate probabilistic bin size or right dimention split, try to adjust the BFV parameters")
 	}
 	return ctx, nil
 }

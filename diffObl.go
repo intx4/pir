@@ -9,8 +9,6 @@ import (
 	"sync"
 )
 
-var DBSizeUpperBound = 1 << 20
-
 // This module holds the logic for Differential Obliviousness
 type DiffOblModule struct {
 	DBSize      int
@@ -46,7 +44,7 @@ func (DO *DiffOblModule) GenDPHistogram() {
 		Scale: f,
 		Src:   DO.source,
 	}
-	B := utils.Min(float64(DBsize), math.Abs(L.Quantile(delta/2))) //clipping
+	B := math.Abs(L.Quantile(delta / 2)) //clipping
 	h := make([]int, DBsize)
 	var wg sync.WaitGroup
 	pool := make(chan struct{}, runtime.NumCPU())
@@ -59,8 +57,8 @@ func (DO *DiffOblModule) GenDPHistogram() {
 		go func(i int) {
 			defer wg.Done()
 			u := L.Rand()
-			u = utils.Max(0, B+utils.Min(B, u))
-			h[i] = int(u)
+			u = utils.Min(float64(DBsize-1), utils.Max(0, B+utils.Min(B, u)))
+			h[i] = int(math.Floor(u))
 			pool <- struct{}{}
 		}(i)
 	}

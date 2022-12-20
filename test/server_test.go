@@ -47,19 +47,19 @@ func TestServerEncode(t *testing.T) {
 					server.AddProfile(&settings.PIRProfile{
 						Rlk:  nil,
 						Rtks: nil,
-						LogN: logN,
-						Q:    box.Params.Q(),
-						P:    box.Params.P(),
-						Id:   0,
+						Params: []settings.PIRCryptoParams{{LogN: logN,
+							Q: box.Params.Q(),
+							P: box.Params.P(),
+						}},
+						Id: 0,
 					})
-					K, Kd := settings.RoundUpToDim(float64(ctx.PackedSize), dimentions)
+					K, Kd := settings.RoundUpToDim(float64(ctx.K), dimentions)
 					mockQuery := &pir.PIRQuery{
 						Q:          nil,
 						Seed:       0,
 						K:          K,
 						Dimentions: dimentions,
 						Kd:         Kd,
-						Ks:         nil,
 						Id:         0,
 					}
 					if ecdStore, box, err := server.Encode(ctx, mockQuery); err != nil {

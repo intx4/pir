@@ -15,9 +15,9 @@ import (
 var PAD_PREFIX string = "10011111001"
 var VALUE_SEPARATOR string = "|"
 
-func IsIn(a interface{}, v interface{}) bool {
-	for i := range a.([]interface{}) {
-		if a.([]interface{})[i] == v {
+func IsIn(a []string, v string) bool {
+	for i := range a {
+		if a[i] == v {
 			return true
 		}
 	}
@@ -235,12 +235,13 @@ func MapIdxToDim(idx int, dimSize int, dimentions int) (string, []int) {
 	coordsV := make([]int, dimentions)
 	coords := ""
 	j := 0
-	for i := dimentions - 1; i > 0; i-- {
+	for i := dimentions - 1; i >= 0; i-- {
 		coordsV[j] = idx / int(math.Pow(float64(dimSize), float64(i)))
 		coords += strconv.FormatInt(int64(coordsV[j]), 10) + VALUE_SEPARATOR
+		j++
 		idx = idx % int(math.Pow(float64(dimSize), float64(i)))
 	}
-	return coords, coordsV
+	return coords[:len(coords)-1], coordsV
 }
 
 // Recursive function to generate keys at depth nextdepth = currdepth+1 (depth is a dimention)
@@ -278,5 +279,5 @@ func ShowCoeffs(ct *rlwe.Ciphertext, box settings.HeBox) {
 		box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
 	}
 	box.Ecd.ScaleDown(decR, ptRt)
-	fmt.Println(ptRt.Value.Coeffs[0])
+	fmt.Println(ptRt.Value.Coeffs[0][:2])
 }
