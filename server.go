@@ -360,6 +360,7 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 	default:
 		return nil, errors.New(fmt.Sprintf("Query must be []*rlwe.Ciphertext or [][]*rlwe.Ciphertext, not %T", query))
 	}
+
 	if pp.Rlk == nil {
 		return nil, errors.New("Relinearization key for user is nil")
 	}
@@ -373,7 +374,6 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 
 	//spawnMultipliers
 	taskCh := make(chan multiplierTask, runtime.NumCPU())
-
 	var wg sync.WaitGroup //sync graceful termination
 	for i := 0; i < runtime.NumCPU(); i++ {
 		wg.Add(1)
@@ -386,13 +386,16 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 	finalAnswer := make([]*rlwe.Ciphertext, 0)
 	for d := 0; d < queryRecvd.Dimentions; d++ {
 		//loop over all dimentions of the hypercube
+
 		//fmt.Println("dimention ", d+1)
 		q := query[d]
+
 		//the idea is to exploit the sync Map for encoding (concurrent writes to disjoint sets of keys)
 		//and nextStore for atomic read->add->write
-
 		nextStore := NewPirStorage()
-		keys := make([]string, 0) //builds access to storage in a recursive way
+
+		//builds access to storage in a recursive way
+		keys := make([]string, 0)
 		utils.GenKeysAtDepth("", d+1, queryRecvd.Dimentions, queryRecvd.Kd, &keys)
 
 		finalRound := d == queryRecvd.Dimentions-1
@@ -406,37 +409,27 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 				//scan this dimention
 				//fmt.Println("Index: ", di)
 				//utils.ShowCoeffs(q[di], *box)
-				if !finalRound {
-					for _, k := range keys {
-						nextK := k[1:] //remove "|"
+				for _, k := range keys {
+					nextK := ""
+					if !finalRound {
+						nextK = k[1:] //remove "|"
 						k = strconv.FormatInt(int64(di), 10) + k
-						//feed multipliers
-						if e, ok := ecdStore.Load(k); ok {
-							numEffectiveKeys++
-							//fmt.Printf("Level: %d x %d, depth: %d\n", q[di].Level(), e.([]rlwe.Operand)[0].Level(), d)
-							taskCh <- multiplierTask{
-								Query:      q.([]*rlwe.Ciphertext)[di],
-								Values:     e.([]rlwe.Operand),
-								ResultMap:  nextStore,
-								ResultKey:  nextK,
-								FeedBackCh: feedbackCh,
-							}
-						}
+					} else {
+						k = strconv.FormatInt(int64(di), 10)
 					}
-				} else {
-					k := strconv.FormatInt(int64(di), 10)
+					//feed multipliers
 					if e, ok := ecdStore.Load(k); ok {
 						numEffectiveKeys++
+						//fmt.Printf("Level: %d x %d, depth: %d\n", q[di].Level(), e.([]rlwe.Operand)[0].Level(), d)
 						taskCh <- multiplierTask{
 							Query:      q.([]*rlwe.Ciphertext)[di],
 							Values:     e.([]rlwe.Operand),
 							ResultMap:  nextStore,
-							ResultKey:  "",
+							ResultKey:  nextK,
 							FeedBackCh: feedbackCh,
 						}
 					}
 				}
-				//wait for the routines to compute the keys for this di
 			}
 		case int:
 			//purge all the keys which do not have the right index for dimention
@@ -457,6 +450,7 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 				}
 			}
 		}
+		//wait for the routines to compute the keys for this di
 		for numComputedKeys < numEffectiveKeys {
 			numComputedKeys += <-feedbackCh
 		}
