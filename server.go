@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"time"
 )
 
 /*
@@ -311,7 +312,10 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, queryRecvd interface{}, pp *set
 			return nil, errors.New("Client needs to provide rotation keys for Expand")
 		}
 		queryDecompressed, err := DecompressCT(queryRecvd, sampler, PS.Box.Params)
+		start := time.Now()
 		query, err = PS.ObliviousExpand(queryDecompressed.([]*rlwe.Ciphertext), pp.Rtks)
+		end := time.Since(start)
+		fmt.Println("		Expand: ", end)
 		if err != nil {
 			return nil, err
 		}
@@ -363,7 +367,7 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, queryRecvd interface{}, pp *set
 		numEffectiveKeys := 0                                     //keeps track of how many entries are effectively in storage at a given dim
 		numComputedKeys := 0                                      //keeps track of how many query x entry results have been computed in storage at a given dim
 		feedbackCh := make(chan int, PS.Context.Kd*(len(keys)+1)) //+1 for final round when len(keys) is 0
-
+		start := time.Now()
 		for di := 0; di < PS.Context.Kd; di++ {
 			//scan this dimention
 
@@ -402,8 +406,11 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, queryRecvd interface{}, pp *set
 		for numComputedKeys < numEffectiveKeys {
 			numComputedKeys += <-feedbackCh
 		}
+		end := time.Since(start)
+		fmt.Println("		Dim ", d, " Multiplications: ", end)
 		//relin and modswitch + recursively update storage
 		ecdStore = NewPirStorage() //we transform ecdStore into a PIRStorage after first iter to reduce memory
+		start = time.Now()
 		nextStore.Mux.RLock()
 		for key, value := range nextStore.Map {
 			for _, ct := range value {
@@ -425,6 +432,8 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, queryRecvd interface{}, pp *set
 			}
 		}
 		nextStore.Mux.RUnlock()
+		end = time.Since(start)
+		fmt.Println("		Update storage: ", end)
 	}
 	close(taskCh)
 	wg.Wait()
