@@ -434,7 +434,7 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 	listOfEntries := []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
 	sizes := []int{30 * 8, 188 * 8, 288 * 8}
 
-	path := os.ExpandEnv("$HOME/GolandProjects/pir/test/data/pirGoExpansion.csv")
+	path := os.ExpandEnv("$HOME/pir/test/data/pirGoExpansion.csv")
 	os.Remove(path)
 	csvFile, err := os.Create(path)
 	if err != nil {
@@ -531,7 +531,7 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 						t.Fatalf(err.Error())
 					}
 					start = time.Now()
-					answerEnc, err := server.AnswerGen(ecdStorage, serverBox, query)
+					answerEnc, err := server.AnswerGenVanilla(ecdStorage, serverBox, query)
 					answerGenTime := time.Since(start).Seconds()
 
 					if err != nil {
