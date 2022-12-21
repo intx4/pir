@@ -114,7 +114,11 @@ func (PE *PIREntry) Encode(t int, box settings.HeBox) ([]rlwe.Operand, error) {
 	if err != nil {
 		return nil, err
 	}
-	return utils.EncodeChunks(chunks, box), nil
+	encodedChunks := utils.EncodeChunks(chunks, box)
+	if len(encodedChunks) > 1 {
+		fmt.Println("		Bin contains > 1 plaintexts!")
+	}
+	return encodedChunks, nil
 }
 
 type PIRServer struct {
