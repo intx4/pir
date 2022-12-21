@@ -72,7 +72,7 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, leakage int, weaklyPrivate, compressed bool) (*PIRQuery, error) {
+func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, dimentions, leakage int, weaklyPrivate, compressed bool) (*PIRQuery, error) {
 	//new seeded prng
 	seed := rand.Int63n(int64(1<<63 - 1))
 	rand.Seed(seed)
@@ -86,9 +86,8 @@ func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, leakage int,
 	q := new(PIRQuery)
 	q.Id = PC.id
 	q.Seed = seed
-	q.Dimentions = ctx.Dimentions
-	q.K = ctx.K
-	q.Kd = ctx.Kd
+	q.Dimentions = dimentions
+	q.K, q.Kd = settings.RoundUpToDim(float64(ctx.PackedDBSize-1), dimentions)
 	if !weaklyPrivate {
 		if compressed {
 			q.Q, err = PC.compressedQueryGen(key, q.Kd, q.Dimentions)
@@ -102,8 +101,8 @@ func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, leakage int,
 		if leakage == NONE {
 			return nil, errors.New("NONE leakage is supported only if not weakly private query")
 		}
-		TotBitsLeak := math.Log2(float64(ctx.K))
-		PartitionBitsLeak := math.Log2(float64(ctx.Kd))
+		TotBitsLeak := math.Log2(float64(q.K))
+		PartitionBitsLeak := math.Log2(float64(q.Kd))
 		dimToSkip := 0
 		leaked := 0.0
 		if leakage == STANDARD {

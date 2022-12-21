@@ -39,6 +39,22 @@ var QIforExp = map[int]map[int][]int{
 	},
 }
 
+var QIforWP = map[int]map[int][]int{
+	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
+	2: {
+		2048:  []int{35},
+		4096:  []int{35},
+		8192:  []int{35},
+		16384: []int{35},
+	},
+	3: {
+		2048:  []int{35},
+		4096:  []int{35},
+		8192:  []int{35},
+		16384: []int{35},
+	},
+}
+
 // Wraps all the struct necessary for BFV
 type HeBox struct {
 	Params bfv.Parameters
@@ -51,12 +67,16 @@ type HeBox struct {
 	Evt    bfv.Evaluator
 }
 
-func NewHeBox(logN, dimentions int, expansion bool) (*HeBox, error) {
+func NewHeBox(logN, dimentions int, expansion bool, weaklyPrivate bool) (*HeBox, error) {
 	//to do: add checks at some point to make sure that depth is aligned with levels
 	var qi map[int]map[int][]int
 	var pi []int = nil
 	if expansion == true {
-		qi = QIforExp
+		if !weaklyPrivate {
+			qi = QIforExp
+		} else {
+			qi = QIforWP
+		}
 	} else {
 		qi = QI
 	}

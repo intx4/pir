@@ -31,7 +31,7 @@ func TestServerEncode(t *testing.T) {
 			}
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
-					box, err := settings.NewHeBox(logN, dimentions, false)
+					box, err := settings.NewHeBox(logN, dimentions, false, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -39,7 +39,7 @@ func TestServerEncode(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					server := pir.NewPirServer(db)
+					server := pir.NewPirServer()
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -53,7 +53,7 @@ func TestServerEncode(t *testing.T) {
 						}},
 						Id: 0,
 					})
-					K, Kd := settings.RoundUpToDim(float64(ctx.K), dimentions)
+					K, Kd := settings.RoundUpToDim(float64(ctx.PackedDBSize), dimentions)
 					mockQuery := &pir.PIRQuery{
 						Q:          nil,
 						Seed:       0,
@@ -62,7 +62,7 @@ func TestServerEncode(t *testing.T) {
 						Kd:         Kd,
 						Id:         0,
 					}
-					if ecdStore, box, err := server.Encode(ctx, mockQuery); err != nil {
+					if ecdStore, box, err := server.Encode(ctx, mockQuery, db); err != nil {
 						t.Fatalf(err.Error())
 					} else {
 						ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
@@ -75,7 +75,8 @@ func TestServerEncode(t *testing.T) {
 							return true
 						})
 						for k, v := range ecdStorageAsMap {
-							expected := server.Store[k].Coalesce()
+							entryFromDb, _ := server.Store.Load(k)
+							expected := entryFromDb.(*pir.PIREntry).Coalesce()
 							actual := box.Ecd.DecodeUintNew(v[0])
 							for i := 1; i < len(v); i++ {
 								actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)

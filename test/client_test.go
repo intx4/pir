@@ -3,9 +3,9 @@ package test
 import (
 	"bytes"
 	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"github.com/stretchr/testify/require"
-	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"log"
 	"math/rand"
@@ -37,7 +37,7 @@ func TestClientQueryGenNoExpansion(t *testing.T) {
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
 					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, false)
+					box, err := settings.NewHeBox(logN, dimentions, false, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -51,7 +51,7 @@ func TestClientQueryGenNoExpansion(t *testing.T) {
 						t.Fatalf(err.Error())
 					}
 					choice := rand.Int() % len(keys)
-					query, err := client.QueryGen(keys[choice], ctx, dimentions, false, false)
+					query, err := client.QueryGen(keys[choice], ctx, dimentions, pir.NONE, false, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -113,7 +113,7 @@ func TestClientQueryGenWithExpansion(t *testing.T) {
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
 					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true)
+					box, err := settings.NewHeBox(logN, dimentions, true, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -124,7 +124,7 @@ func TestClientQueryGenWithExpansion(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					server := pir.NewPirServer(db)
+					server := pir.NewPirServer()
 
 					//now the server is able to create a context with the params provided by client
 					ctx, err := settings.NewPirContext(item, size, box.Params)
@@ -132,7 +132,7 @@ func TestClientQueryGenWithExpansion(t *testing.T) {
 						t.Fatalf(err.Error())
 					}
 					choice := rand.Int() % len(keys)
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, false, true)
+					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, false, true)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -197,7 +197,7 @@ func TestClientQueryWeaklyPrivate(t *testing.T) {
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
 					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true)
+					box, err := settings.NewHeBox(logN, dimentions, true, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -211,7 +211,7 @@ func TestClientQueryWeaklyPrivate(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					server := pir.NewPirServer(db)
+					server := pir.NewPirServer()
 
 					//now the server is able to create a context with the params provided by client
 					ctx, err := settings.NewPirContext(item, size, box.Params)
@@ -219,7 +219,7 @@ func TestClientQueryWeaklyPrivate(t *testing.T) {
 						t.Fatalf(err.Error())
 					}
 					choice := rand.Int() % len(keys)
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, true, true)
+					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, true, true)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -307,7 +307,7 @@ func TestClientRetrieval(t *testing.T) {
 			for _, dimentions := range []int{2} {
 				for _, logN := range []int{13, 14} {
 					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, false)
+					box, err := settings.NewHeBox(logN, dimentions, false, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -318,7 +318,7 @@ func TestClientRetrieval(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					server := pir.NewPirServer(db)
+					server := pir.NewPirServer()
 					server.AddProfile(profile)
 					if err != nil {
 						t.Fatalf(err.Error())
@@ -330,7 +330,7 @@ func TestClientRetrieval(t *testing.T) {
 					}
 					choice := rand.Int() % len(keys)
 					start := time.Now()
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, pir.NONE, false, false)
+					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, false, false)
 					queryGenTime := time.Since(start).Seconds()
 					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
 					if err != nil {
@@ -338,25 +338,19 @@ func TestClientRetrieval(t *testing.T) {
 					}
 					//server encodes its storage into plaintexts
 					start = time.Now()
-					ecdStorage, serverBox, err := server.Encode(ctx, query)
+					ecdStorage, serverBox, err := server.Encode(ctx, query, db)
 					ecdTime := time.Since(start).Seconds()
 					ecdSize := 0
-					ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
+					ecdStorageAsMap := make(map[string]*pir.PIREntry)
 					ecdStorage.Range(func(key, value any) bool {
-						valueToStore := make([]*bfv.PlaintextMul, len(value.([]rlwe.Operand)))
-						for i, v := range value.([]rlwe.Operand) {
-							valueToStore[i] = v.(*bfv.PlaintextMul)
-						}
-						ecdStorageAsMap[key.(string)] = valueToStore
+						ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
 						return true
 					})
 					for _, e := range ecdStorageAsMap {
-						for _, pt := range e {
-							serialized, err := pt.MarshalBinary()
-							ecdSize += len(serialized)
-							if err != nil {
-								t.Fatalf(err.Error())
-							}
+						serialized, err := json.Marshal(e)
+						ecdSize += len(serialized)
+						if err != nil {
+							t.Fatalf(err.Error())
 						}
 					}
 
@@ -385,9 +379,10 @@ func TestClientRetrieval(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					if bytes.Compare(server.Store[choosenKey].Coalesce(), answerPt) != 0 {
+					expected, _ := server.Store.Load(choosenKey)
+					if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
 						fmt.Println("Want")
-						fmt.Println(server.Store[choosenKey].Value)
+						fmt.Println(expected.(*pir.PIREntry).Value)
 						fmt.Println("Got")
 						fmt.Println(answerPt)
 						t.Fatalf("Answer does not match expected")
@@ -464,7 +459,7 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 			for _, dimentions := range []int{2} {
 				for _, logN := range []int{13, 14} {
 					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true)
+					box, err := settings.NewHeBox(logN, dimentions, true, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -478,7 +473,7 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					server := pir.NewPirServer(db)
+					server := pir.NewPirServer()
 					server.AddProfile(profile)
 					if err != nil {
 						t.Fatalf(err.Error())
@@ -490,7 +485,7 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 					}
 					choice := rand.Int() % len(keys)
 					start := time.Now()
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, pir.NONE, false, true)
+					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, false, true)
 					queryGenTime := time.Since(start).Seconds()
 					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
 					if err != nil {
@@ -498,25 +493,19 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 					}
 					//server encodes its storage into plaintexts
 					start = time.Now()
-					ecdStorage, serverBox, err := server.Encode(ctx, query)
+					ecdStorage, serverBox, err := server.Encode(ctx, query, db)
 					ecdTime := time.Since(start).Seconds()
 					ecdSize := 0
-					ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
+					ecdStorageAsMap := make(map[string]*pir.PIREntry)
 					ecdStorage.Range(func(key, value any) bool {
-						valueToStore := make([]*bfv.PlaintextMul, len(value.([]rlwe.Operand)))
-						for i, v := range value.([]rlwe.Operand) {
-							valueToStore[i] = v.(*bfv.PlaintextMul)
-						}
-						ecdStorageAsMap[key.(string)] = valueToStore
+						ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
 						return true
 					})
 					for _, e := range ecdStorageAsMap {
-						for _, pt := range e {
-							serialized, err := pt.MarshalBinary()
-							ecdSize += len(serialized)
-							if err != nil {
-								t.Fatalf(err.Error())
-							}
+						serialized, err := json.Marshal(e)
+						ecdSize += len(serialized)
+						if err != nil {
+							t.Fatalf(err.Error())
 						}
 					}
 
@@ -531,7 +520,7 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 						t.Fatalf(err.Error())
 					}
 					start = time.Now()
-					answerEnc, err := server.AnswerGenVanilla(ecdStorage, serverBox, query)
+					answerEnc, err := server.AnswerGen(ecdStorage, serverBox, query)
 					answerGenTime := time.Since(start).Seconds()
 
 					if err != nil {
@@ -545,9 +534,10 @@ func TestClientRetrievalWithExpansion(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					if bytes.Compare(server.Store[choosenKey].Coalesce(), answerPt) != 0 {
+					expected, _ := server.Store.Load(choosenKey)
+					if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
 						fmt.Println("Want")
-						fmt.Println(server.Store[choosenKey].Value)
+						fmt.Println(expected.(*pir.PIREntry).Value)
 						fmt.Println("Got")
 						fmt.Println(answerPt)
 						t.Fatalf("Answer does not match expected")
@@ -592,9 +582,9 @@ func TestClientRetrievalWP(t *testing.T) {
 	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
 
 	listOfEntries := []int{1 << 20}
-	sizes := []int{188 * 8, 288 * 8}
+	sizes := []int{30 * 8, 188 * 8, 288 * 8}
 
-	path := os.ExpandEnv("$HOME/GolandProjects/pir/test/data/pirGoWP.csv")
+	path := os.ExpandEnv("$HOME/pir/test/data/pirGoWP.csv")
 	os.Remove(path)
 	csvFile, err := os.Create(path)
 	if err != nil {
@@ -622,9 +612,9 @@ func TestClientRetrievalWP(t *testing.T) {
 				}
 			}
 			for _, dimentions := range []int{2} {
-				for _, logN := range []int{13, 14} {
+				for _, logN := range []int{12, 13, 14} {
 					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true)
+					box, err := settings.NewHeBox(logN, dimentions, true, true)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -635,7 +625,7 @@ func TestClientRetrievalWP(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					server := pir.NewPirServer(db)
+					server := pir.NewPirServer()
 					server.AddProfile(profile)
 					if err != nil {
 						t.Fatalf(err.Error())
@@ -651,7 +641,7 @@ func TestClientRetrievalWP(t *testing.T) {
 					}
 					choice := rand.Int() % len(keys)
 					start := time.Now()
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, pir.STANDARD, true, true)
+					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.STANDARD, true, true)
 					queryGenTime := time.Since(start).Seconds()
 					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
 					if err != nil {
@@ -659,25 +649,19 @@ func TestClientRetrievalWP(t *testing.T) {
 					}
 					//server encodes its storage into plaintexts
 					start = time.Now()
-					ecdStorage, serverBox, err := server.Encode(ctx, query)
+					ecdStorage, serverBox, err := server.Encode(ctx, query, db)
 					ecdTime := time.Since(start).Seconds()
 					ecdSize := 0
-					ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
+					ecdStorageAsMap := make(map[string]*pir.PIREntry)
 					ecdStorage.Range(func(key, value any) bool {
-						valueToStore := make([]*bfv.PlaintextMul, len(value.([]rlwe.Operand)))
-						for i, v := range value.([]rlwe.Operand) {
-							valueToStore[i] = v.(*bfv.PlaintextMul)
-						}
-						ecdStorageAsMap[key.(string)] = valueToStore
+						ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
 						return true
 					})
 					for _, e := range ecdStorageAsMap {
-						for _, pt := range e {
-							serialized, err := pt.MarshalBinary()
-							ecdSize += len(serialized)
-							if err != nil {
-								t.Fatalf(err.Error())
-							}
+						serialized, err := json.Marshal(e)
+						ecdSize += len(serialized)
+						if err != nil {
+							t.Fatalf(err.Error())
 						}
 					}
 
@@ -706,9 +690,10 @@ func TestClientRetrievalWP(t *testing.T) {
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					if bytes.Compare(server.Store[choosenKey].Coalesce(), answerPt) != 0 {
+					expected, _ := server.Store.Load(choosenKey)
+					if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
 						fmt.Println("Want")
-						fmt.Println(server.Store[choosenKey].Value)
+						fmt.Println(expected.(*pir.PIREntry).Value)
 						fmt.Println("Got")
 						fmt.Println(answerPt)
 						t.Fatalf("Answer does not match expected")
