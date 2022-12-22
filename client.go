@@ -5,18 +5,11 @@ import (
 	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
-	utils2 "github.com/tuneinsight/lattigo/v4/utils"
 	"log"
 	"math"
 	"math/rand"
 	"pir/settings"
 	"pir/utils"
-)
-
-const (
-	NONE int = iota
-	STANDARD
-	HIGH
 )
 
 type PIRClient struct {
@@ -59,11 +52,8 @@ Inside on of the sublists, you have a list of ciphers when only one is enc(1) to
 */
 func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, dimentions, leakage int, weaklyPrivate, compressed bool) (*PIRQuery, float64, error) {
 	//new seeded prng
-	seed := rand.Int63n(int64(1<<63 - 1))
-	rand.Seed(seed)
-	keyPRNG := make([]byte, 64)
-	rand.Read(keyPRNG)
-	prng, err := utils2.NewKeyedPRNG(keyPRNG)
+	seed := rand.Int63n(1<<63 - 1)
+	prng, err := NewPRNG(seed)
 	if err != nil {
 		panic(err)
 	}
@@ -88,14 +78,14 @@ func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, dimentions, 
 		if compressed == false {
 			return nil, 0, errors.New("WPIR queries are not supported without compression")
 		}
-		if leakage == NONE {
+		if leakage == NONELEAKAGE {
 			return nil, 0, errors.New("NONE leakage is supported only if not weakly private query")
 		}
 		s := 1.0
-		if leakage == STANDARD {
+		if leakage == STANDARDLEAKAGE {
 			s = math.Floor(float64(dimentions) / 2)
 		}
-		if leakage == HIGH {
+		if leakage == HIGHLEAKAGE {
 			s = float64(dimentions - 1)
 		}
 		TotBitsLeak := math.Log2(float64(ctx.DBItems))

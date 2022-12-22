@@ -21,20 +21,20 @@ import (
 
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
+var ListOfEntries = []int{1 << 14, 1 << 16, 1 << 18, 1 << 20, 1 << 28}
 var Sizes = []int{30 * 8, 188 * 8, 288 * 8}
 
 func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivate bool, leakage int) {
 	csvFile := new(os.File)
 	var err error
-	if !weaklyPrivate || (weaklyPrivate && leakage == 1) {
+	if !weaklyPrivate || (weaklyPrivate && leakage == pir.STANDARDLEAKAGE) {
 		os.Remove(path)
 		csvFile, err = os.Create(path)
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
-	} else if weaklyPrivate && leakage == 2 {
-		csvFile, err = os.OpenFile(path, os.O_APPEND, 0644)
+	} else if weaklyPrivate && leakage == pir.HIGHLEAKAGE {
+		csvFile, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
@@ -60,8 +60,18 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					i++
 				}
 			}
-			for _, dimentions := range []int{2} {
-				for _, logN := range []int{13, 14} {
+			for _, dimentions := range []int{2, 3, 4, 5} {
+				if !weaklyPrivate {
+					if dimentions > 2 {
+						continue
+					}
+				}
+				for _, logN := range []int{12, 13, 14} {
+					if !weaklyPrivate {
+						if logN == 12 {
+							continue
+						}
+					}
 					//first we create some parameters
 					params := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
 					//now we create a new client instance
@@ -82,7 +92,10 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					}
 					choice := rand.Int() % len(keys)
 					start := time.Now()
-					query, leakedBits, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, weaklyPrivate, expansion)
+					query, leakedBits, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, leakage, weaklyPrivate, expansion)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
 					queryGenTime := time.Since(start).Seconds()
 					clientBox := client.SetsOfBox[utils.FormatParams(params)]
 					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
@@ -181,7 +194,6 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 
 func TestClientRetrieval(t *testing.T) {
 	//DB dimentions
-	os.Chdir(DIR)
 	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
 	testCases := []struct {
 		name          string
@@ -190,10 +202,10 @@ func TestClientRetrieval(t *testing.T) {
 		weaklyPrivate bool
 		leakage       int
 	}{
-		{"No Expansion", "pirGo.csv", false, false, 0},
-		{"Expansion", "pirGoExp.csv", true, false, 0},
-		{"WPIR STD", "pirGoWP.csv", true, true, 1},
-		{"WPIR STD", "pirGoWP.csv", true, true, 2},
+		{"No Expansion", DIR + "pirGo.csv", false, false, pir.NONELEAKAGE},
+		{"Expansion", DIR + "pirGoExp.csv", true, false, pir.NONELEAKAGE},
+		{"WPIR STD", DIR + "pirGoWP.csv", true, true, pir.STANDARDLEAKAGE},
+		{"WPIR HIGH", DIR + "pirGoWP.csv", true, true, pir.HIGHLEAKAGE},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -11,11 +11,24 @@ import (
 	"math/rand"
 )
 
-func NewSampler(seed int64, params bfv.Parameters) (*ringqp.UniformSampler, error) {
+const (
+	NONELEAKAGE int = iota
+	STANDARDLEAKAGE
+	HIGHLEAKAGE
+)
+
+func NewPRNG(seed int64) (*utils2.KeyedPRNG, error) {
 	rand.Seed(seed)
 	keyPRNG := make([]byte, 64)
 	rand.Read(keyPRNG)
 	prng, err := utils2.NewKeyedPRNG(keyPRNG)
+	if err != nil {
+		return nil, err
+	}
+	return prng, nil
+}
+func NewSampler(seed int64, params bfv.Parameters) (*ringqp.UniformSampler, error) {
+	prng, err := NewPRNG(seed)
 	if err != nil {
 		return nil, err
 	}

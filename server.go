@@ -6,11 +6,8 @@ import (
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/ring"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
-	"github.com/tuneinsight/lattigo/v4/rlwe/ringqp"
-	utils2 "github.com/tuneinsight/lattigo/v4/utils"
 	"log"
 	"math"
-	"math/rand"
 	"pir/settings"
 	"pir/utils"
 	"runtime"
@@ -187,14 +184,10 @@ func (PS *PIRServer) WithParams(clientId, paramsId string) (*settings.HeBox, err
 func (PS *PIRServer) ProcessPIRQuery(queryRecvd *PIRQuery, box *settings.HeBox) ([]interface{}, error) {
 	var query []interface{} //each entry is either an array of ciphertexts or directly the index to retrieve for this dimention for WPIR
 	//Initialize sampler from user seed
-	rand.Seed(queryRecvd.Seed)
-	keyPRNG := make([]byte, 64)
-	rand.Read(keyPRNG)
-	prng, err := utils2.NewKeyedPRNG(keyPRNG)
+	sampler, err := NewSampler(queryRecvd.Seed, box.Params)
 	if err != nil {
 		return nil, err
 	}
-	sampler := ringqp.NewUniformSampler(prng, *box.Params.RingQP())
 
 	switch queryRecvd.Q.(type) {
 	case []*PIRQueryItem:
@@ -202,13 +195,13 @@ func (PS *PIRServer) ProcessPIRQuery(queryRecvd *PIRQuery, box *settings.HeBox) 
 		if box.Rtks == nil {
 			return nil, errors.New("Client needs to provide rotation keys for Expand")
 		}
-		queryDecompressed, err := DecompressCT(queryRecvd.Q, sampler, box.Params)
+		queryDecompressed, err := DecompressCT(queryRecvd.Q, *sampler, box.Params)
 		query, err = PS.ObliviousExpand(queryDecompressed, box, queryRecvd.Dimentions, queryRecvd.Kd)
 		if err != nil {
 			return nil, err
 		}
 	case [][]*PIRQueryItem:
-		queryDecompressed, err := DecompressCT(queryRecvd.Q, sampler, box.Params)
+		queryDecompressed, err := DecompressCT(queryRecvd.Q, *sampler, box.Params)
 		if err != nil {
 			return nil, err
 		}
