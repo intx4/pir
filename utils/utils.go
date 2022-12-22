@@ -8,7 +8,6 @@ import (
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"math"
 	"math/big"
-	"pir/settings"
 	"strconv"
 )
 
@@ -271,13 +270,17 @@ func EncodeCoeffs(ecd bfv.Encoder, params bfv.Parameters, coeffs []uint64) *rlwe
 	return pt
 }
 
-func ShowCoeffs(ct *rlwe.Ciphertext, box settings.HeBox) {
-	decR := box.Dec.DecryptNew(ct)
-	ptRt := bfv.NewPlaintextRingT(box.Params)
+func ShowCoeffs(ct *rlwe.Ciphertext, decryptor rlwe.Decryptor, ecd bfv.Encoder, params bfv.Parameters) {
+	decR := decryptor.DecryptNew(ct)
+	ptRt := bfv.NewPlaintextRingT(params)
 	if decR.IsNTT {
 		fmt.Println("NTT")
-		box.Params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
+		params.RingQ().InvNTTLvl(decR.Level(), decR.Value, decR.Value)
 	}
-	box.Ecd.ScaleDown(decR, ptRt)
+	ecd.ScaleDown(decR, ptRt)
 	fmt.Println(ptRt.Value.Coeffs[0][:2])
+}
+
+func FormatParams(params bfv.Parameters) string {
+	return strconv.FormatInt(int64(params.LogN()), 10) + "|" + strconv.FormatInt(int64(params.LogP()+params.LogQ()), 10)
 }

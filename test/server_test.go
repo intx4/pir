@@ -3,17 +3,17 @@ package test
 import (
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
+	"math/rand"
 	"pir"
 	"pir/settings"
 	"pir/utils"
 	"testing"
 )
 
-// This test takes time
+// Takes Time
 func TestServerEncode(t *testing.T) {
-	//various settings for the db size
-	items := []int{1 << 10, 1 << 12}
-	sizes := []int{150 * 8, 250 * 8}
+	var items = []int{1 << 10, 1 << 12}
+	var sizes = []int{150 * 8, 250 * 8}
 
 	for _, item := range items {
 		for _, size := range sizes {
@@ -23,7 +23,7 @@ func TestServerEncode(t *testing.T) {
 			db := make(map[string][]byte)
 			for i := 0; i < len(keys); {
 				keys[i] = string(RandByteString(100))
-				values[i] = RandByteString(size)
+				values[i] = RandByteString(size / 8)
 				if _, ok := db[keys[i]]; !ok {
 					db[keys[i]] = values[i]
 					i++
@@ -31,38 +31,127 @@ func TestServerEncode(t *testing.T) {
 			}
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
-					box, err := settings.NewHeBox(logN, dimentions, false, false)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					ctx, err := settings.NewPirContext(item, size, box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
+					params := settings.GetsParamForPIR(logN, dimentions, false, false, 0)
 					server := pir.NewPirServer()
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
 					//let's verify that values are encoded as expected
 					server.AddProfile(&settings.PIRProfile{
-						Rlk:  nil,
-						Rtks: nil,
-						Params: []settings.PIRCryptoParams{{LogN: logN,
-							Q: box.Params.Q(),
-							P: box.Params.P(),
+						CryptoParams: []settings.PIRCryptoParams{{
+							Params:   params.ParametersLiteral(),
+							ParamsId: utils.FormatParams(params),
 						}},
-						Id: 0,
+						ClientId: "1",
 					})
+					ctx, err := settings.NewPirContext(item, size, params, utils.FormatParams(params))
 					K, Kd := settings.RoundUpToDim(float64(ctx.PackedDBSize), dimentions)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
 					mockQuery := &pir.PIRQuery{
 						Q:          nil,
 						Seed:       0,
 						K:          K,
 						Dimentions: dimentions,
 						Kd:         Kd,
-						Id:         0,
+						ClientId:   "1",
+						ParamsId:   utils.FormatParams(params),
 					}
-					if ecdStore, box, err := server.Encode(ctx, mockQuery, db); err != nil {
+					serverBox, err := server.WithParams(mockQuery.ClientId, mockQuery.ParamsId)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+
+					if ecdStore, err := server.Encode(mockQuery.K, mockQuery.Kd, mockQuery.Dimentions, ctx, serverBox, []interface{}{}, db); err != nil {
+						t.Fatalf(err.Error())
+					} else {
+						ecdStorageAsMap := make(map[string][]rlwe.Operand)
+						ecdStore.Range(func(key, value any) bool {
+							ecdStorageAsMap[key.(string)], _ = value.(*pir.PIREntry).Encode(settings.TUsableBits, serverBox.Ecd.ShallowCopy(), params)
+							return true
+						})
+						for k, v := range ecdStorageAsMap {
+							entryFromDb, _ := server.Store.Load(k)
+							expected := entryFromDb.(*pir.PIREntry).Coalesce()
+							actual := serverBox.Ecd.DecodeUintNew(v[0].(*bfv.PlaintextMul))
+							for i := 1; i < len(v); i++ {
+								actual = append(actual, serverBox.Ecd.DecodeUintNew(v[i])...)
+							}
+							actualBytes, err := utils.Unchunkify(actual, settings.TUsableBits)
+							if err != nil {
+								t.Fatalf(err.Error())
+							}
+							if len(actualBytes) != len(expected) {
+								t.Fatalf("Len of decoded value is not same as original")
+							}
+							for i := range expected {
+								if actualBytes[i] != expected[i] {
+									t.Fatalf("Decoded value does not match original")
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}
+func TestServerEncodeWPIR(t *testing.T) {
+	var items = []int{1 << 10, 1 << 12}
+	var sizes = []int{150 * 8, 250 * 8}
+
+	for _, item := range items {
+		for _, size := range sizes {
+			//fake db
+			keys := make([]string, item)
+			values := make([][]byte, item)
+			db := make(map[string][]byte)
+			for i := 0; i < len(keys); {
+				keys[i] = string(RandByteString(100))
+				values[i] = RandByteString(size / 8)
+				if _, ok := db[keys[i]]; !ok {
+					db[keys[i]] = values[i]
+					i++
+				}
+			}
+			for _, dimentions := range []int{2, 3} {
+				for _, logN := range []int{13, 14} {
+					params := settings.GetsParamForPIR(logN, dimentions, true, true, 2)
+					server := pir.NewPirServer()
+					//let's verify that values are encoded as expected
+					server.AddProfile(&settings.PIRProfile{
+						CryptoParams: []settings.PIRCryptoParams{{
+							Params:   params.ParametersLiteral(),
+							ParamsId: utils.FormatParams(params),
+						}},
+						ClientId: "1",
+					})
+					ctx, err := settings.NewPirContext(item, size, params, utils.FormatParams(params))
+					K, Kd := settings.RoundUpToDim(float64(ctx.PackedDBSize), dimentions)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					q := make([]interface{}, dimentions)
+					for i := 0; i < dimentions-1; i++ {
+						q[i] = int(rand.Int63n(int64(Kd)))
+					}
+					mockQuery := &pir.PIRQuery{
+						Q:          nil,
+						Seed:       0,
+						K:          K,
+						Dimentions: dimentions,
+						Kd:         Kd,
+						ClientId:   "",
+						ParamsId:   "",
+					}
+					serverBox, err := server.WithParams(mockQuery.ClientId, mockQuery.ParamsId)
+					queryProc, err := server.ProcessPIRQuery(mockQuery, serverBox)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					if ecdStore, err := server.Encode(mockQuery.K, mockQuery.Kd, mockQuery.Dimentions, ctx, serverBox, queryProc, db); err != nil {
 						t.Fatalf(err.Error())
 					} else {
 						ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
@@ -77,9 +166,9 @@ func TestServerEncode(t *testing.T) {
 						for k, v := range ecdStorageAsMap {
 							entryFromDb, _ := server.Store.Load(k)
 							expected := entryFromDb.(*pir.PIREntry).Coalesce()
-							actual := box.Ecd.DecodeUintNew(v[0])
+							actual := serverBox.Ecd.DecodeUintNew(v[0])
 							for i := 1; i < len(v); i++ {
-								actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)
+								actual = append(actual, serverBox.Ecd.DecodeUintNew(v[i])...)
 							}
 							actualBytes, err := utils.Unchunkify(actual, settings.TUsableBits)
 							if err != nil {

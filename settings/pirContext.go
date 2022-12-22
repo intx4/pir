@@ -5,16 +5,17 @@ import (
 	"github.com/davidkleiven/gononlin/nonlin"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"math"
+	"pir/utils"
 )
 
 // Represents a context for the PIR scheme:
 type PirContext struct {
-	DBItems         int `json:"db_items,omitempty"`
-	DBSize          int `json:"db_size,omitempty"`
-	MaxBinSize      int `json:"max_bin_size,omitempty"`
-	ExpectedBinSize int `json:"expected_bin_size,omitempty"`
-	PackedDBSize    int `json:"packed_db_size"`
-	LogN            int `json:"log_n,omitempty"`
+	DBItems         int    `json:"db_items,omitempty"`
+	DBSize          int    `json:"db_size,omitempty"`
+	MaxBinSize      int    `json:"max_bin_size,omitempty"`
+	ExpectedBinSize int    `json:"expected_bin_size,omitempty"`
+	PackedDBSize    int    `json:"packed_db_size"`
+	ParamsId        string `json:"params_id,omitempty"`
 }
 
 // used for estimating bin size from https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
@@ -35,8 +36,8 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 }
 
 // Takes as input number of items in DB, bit size of items, and params
-func NewPirContext(Items int, Size int, params bfv.Parameters) (*PirContext, error) {
-	ctx := &PirContext{DBItems: Items, DBSize: Size, MaxBinSize: int(math.Floor(float64(TUsableBits*(1<<params.LogN())-2) / float64(Size+8)))} //-2 for padding and length, +8 is 1 byte for separator "|"
+func NewPirContext(Items int, Size int, params bfv.Parameters, paramsId string) (*PirContext, error) {
+	ctx := &PirContext{DBItems: Items, DBSize: Size, MaxBinSize: int(math.Floor(float64(TUsableBits*(1<<params.LogN())-1-int(math.Ceil(math.Log2(float64(params.N()*TUsableBits)/8)))) / float64(Size+8))), ParamsId: paramsId} //-2 for padding and length, +8 is 1 byte for separator "|"
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := math.E
 	exp := 2.0
@@ -47,7 +48,7 @@ func NewPirContext(Items int, Size int, params bfv.Parameters) (*PirContext, err
 		prob := nonlin.Problem{F: func(out, x []float64) {
 			out[0] = 1.0 + x[0]*(math.Log(c)-math.Log(x[0])+1.0) - c
 		}}
-		solver := nonlin.NewtonKrylov{
+		solver := utils.NewtonKrylov{
 			// Maximum number of Newton iterations
 			Maxiter: 1e9,
 

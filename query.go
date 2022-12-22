@@ -39,7 +39,8 @@ type PIRQuery struct {
 	K          int         `json:"k,omitempty"`
 	Dimentions int         `json:"dimentions,omitempty"`
 	Kd         int         `json:"kd,omitempty"`
-	Id         int         `json:"id,omitempty"`
+	ClientId   string      `json:"id,omitempty"`
+	ParamsId   string      `json:"paramsId"`
 }
 
 func (PQ *PIRQueryItem) MarshalBinary() ([]byte, error) {

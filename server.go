@@ -118,39 +118,14 @@ func (PE *PIREntry) Encode(t int, ecd bfv.Encoder, params bfv.Parameters) ([]rlw
 
 type PIRServer struct {
 	Store    *sync.Map
-	Profiles map[int]*settings.PIRProfile
+	Profiles map[string]*settings.PIRProfile
 }
 
 func NewPirServer() *PIRServer {
 	PS := new(PIRServer)
 	PS.Store = new(sync.Map)
-	PS.Profiles = make(map[int]*settings.PIRProfile)
+	PS.Profiles = make(map[string]*settings.PIRProfile)
 	return PS
-}
-
-func (PS *PIRServer) AddProfile(pf *settings.PIRProfile) {
-	PS.Profiles[pf.Id] = pf
-}
-func (PS *PIRServer) withProfile(pf *settings.PIRProfile) (*settings.HeBox, error) {
-	//set up box from profile
-	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
-		LogN: pf.Params[0].LogN,
-		Q:    pf.Params[0].Q,
-		P:    pf.Params[0].P,
-		T:    settings.T,
-	})
-	if err != nil {
-		return nil, err
-	}
-	box := &settings.HeBox{
-		Params: params,
-		Ecd:    bfv.NewEncoder(params),
-		Evt: bfv.NewEvaluator(params, rlwe.EvaluationKey{
-			Rlk:  pf.Rlk,
-			Rtks: pf.Rtks,
-		}),
-	}
-	return box, nil
 }
 
 func (PS *PIRServer) Add(key []byte, value []byte, dimentions, Kd, maxBinSize int) (int, error) {
@@ -181,19 +156,70 @@ func (PS *PIRServer) Delete(key []byte, pos, Kd, dimentions int) error {
 	}
 }
 
-func (PS *PIRServer) Encode(ctx *settings.PirContext, query *PIRQuery, db map[string][]byte) (*sync.Map, *settings.HeBox, error) {
-	K, Kd, Dimentions := query.K, query.Kd, query.Dimentions
-	var box *settings.HeBox
-	if _, ok := PS.Profiles[query.Id]; !ok {
-		return nil, nil, errors.New("Could not find profile for id")
+func (PS *PIRServer) AddProfile(pf *settings.PIRProfile) {
+	PS.Profiles[pf.ClientId] = pf
+}
+func (PS *PIRServer) WithParams(clientId, paramsId string) (*settings.HeBox, error) {
+	//set up box from profile
+	box := new(settings.HeBox)
+	for _, p := range PS.Profiles[clientId].CryptoParams {
+		if p.ParamsId == paramsId {
+			params, err := bfv.NewParametersFromLiteral(p.Params)
+			if err != nil {
+				return nil, err
+			}
+			box = &settings.HeBox{
+				Params: params,
+				Ecd:    bfv.NewEncoder(params),
+				Evt: bfv.NewEvaluator(params, rlwe.EvaluationKey{
+					Rlk:  p.Rlk,
+					Rtks: p.Rtks,
+				}),
+				Rtks: p.Rtks,
+				Rlk:  p.Rlk,
+			}
+		}
 	}
-	pp, _ := PS.Profiles[query.Id]
-	box, err := PS.withProfile(pp)
+	return box, nil
+}
 
+// Takes a PIRQuery, Returns an array of interfaces, where each element is either a []*rlwe.Ciphertext or an int that represents the index for that dimention
+func (PS *PIRServer) ProcessPIRQuery(queryRecvd *PIRQuery, box *settings.HeBox) ([]interface{}, error) {
+	var query []interface{} //each entry is either an array of ciphertexts or directly the index to retrieve for this dimention for WPIR
+	//Initialize sampler from user seed
+	rand.Seed(queryRecvd.Seed)
+	keyPRNG := make([]byte, 64)
+	rand.Read(keyPRNG)
+	prng, err := utils2.NewKeyedPRNG(keyPRNG)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
+	sampler := ringqp.NewUniformSampler(prng, *box.Params.RingQP())
 
+	switch queryRecvd.Q.(type) {
+	case []*PIRQueryItem:
+		var err error
+		if box.Rtks == nil {
+			return nil, errors.New("Client needs to provide rotation keys for Expand")
+		}
+		queryDecompressed, err := DecompressCT(queryRecvd.Q, sampler, box.Params)
+		query, err = PS.ObliviousExpand(queryDecompressed, box, queryRecvd.Dimentions, queryRecvd.Kd)
+		if err != nil {
+			return nil, err
+		}
+	case [][]*PIRQueryItem:
+		queryDecompressed, err := DecompressCT(queryRecvd.Q, sampler, box.Params)
+		if err != nil {
+			return nil, err
+		}
+		query = queryDecompressed
+	default:
+		return nil, errors.New(fmt.Sprintf("Query must be []*rlwe.Ciphertext or [][]*rlwe.Ciphertext, not %T", query))
+	}
+	return query, nil
+}
+
+func (PS *PIRServer) Encode(K, Kd, dimentions int, ctx *settings.PirContext, box *settings.HeBox, query []interface{}, db map[string][]byte) (*sync.Map, error) {
 	maxCollisions := 0
 	l := 0
 	for _, v := range db {
@@ -212,14 +238,27 @@ func (PS *PIRServer) Encode(ctx *settings.PirContext, query *PIRQuery, db map[st
 	}
 	for key, value := range db {
 		if len(value) != l {
-			return nil, nil, errors.New(fmt.Sprintf("Not uniform byte length for records: Had %d and now %d", l, len(value)))
+			return nil, errors.New(fmt.Sprintf("Not uniform byte length for records: Had %d and now %d", l, len(value)))
+		}
+		k, coords := utils.MapKeyToDim([]byte(key), Kd, dimentions)
+		process := true
+		for i := 0; i < int(utils.Min(float64(len(query)), float64(len(coords)))); i++ {
+			switch query[i].(type) {
+			case int:
+				if coords[i] != query[i].(int) {
+					process = false
+					break
+				}
+			}
+		}
+		if !process {
+			continue
 		}
 		<-poolCh
 		wg.Add(1)
 		go func(key string, value []byte) {
 			defer wg.Done()
-			k, _ := utils.MapKeyToDim([]byte(key), Kd, Dimentions)
-			if e, ok := PS.Store.LoadOrStore(k, NewPirEntry(value)); ok {
+			if e, ok := PS.Store.LoadOrStore(key, NewPirEntry(value)); ok {
 				//update
 				collisions, err := e.(*PIREntry).Update(value, ctx.MaxBinSize)
 				if err != nil {
@@ -230,7 +269,7 @@ func (PS *PIRServer) Encode(ctx *settings.PirContext, query *PIRQuery, db map[st
 				}
 			}
 			poolCh <- struct{}{}
-		}(key, value)
+		}(k, value)
 	}
 	wg.Wait()
 	log.Println()
@@ -268,7 +307,7 @@ func (PS *PIRServer) Encode(ctx *settings.PirContext, query *PIRQuery, db map[st
 	*/
 	ecdStorage := new(sync.Map)
 	*ecdStorage = *PS.Store
-	return ecdStorage, box, nil
+	return ecdStorage, nil
 }
 
 type multiplierTask struct {
@@ -290,15 +329,15 @@ func invNTTforExpand(expandedCts []*rlwe.Ciphertext, t int, Q *ring.Ring) []*rlw
 	return expandedCts[:t]
 }
 
-// Obliviously expands a compressed query vector. Queries must provided rotation keys
-func (PS *PIRServer) ObliviousExpand(query []interface{}, params bfv.Parameters, rtKeys *rlwe.RotationKeySet, dimentions, Kd int) ([]interface{}, error) {
+// Obliviously expands a compressed query vector. Client must provide rotation keys. Returns an array of interfaces, where each element is either a []*rlwe.Ciphertext or an int that represents the index for that dimention
+func (PS *PIRServer) ObliviousExpand(query []interface{}, box *settings.HeBox, dimentions, Kd int) ([]interface{}, error) {
 	//Procedure 7 from https://eprint.iacr.org/2019/1483.pdf
-	evt := rlwe.NewEvaluator(params.Parameters, &rlwe.EvaluationKey{Rtks: rtKeys})
+	evt := rlwe.NewEvaluator(box.Params.Parameters, &rlwe.EvaluationKey{Rtks: box.Rtks})
 	if len(query) != dimentions {
 		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", dimentions, len(query)))
 	}
 	logm := int(math.Ceil(math.Log2(float64(Kd))))
-	if logm > params.LogN() {
+	if logm > box.Params.LogN() {
 		return nil, errors.New("m > N is not allowed")
 	}
 	expanded := make([]interface{}, dimentions)
@@ -310,44 +349,13 @@ func (PS *PIRServer) ObliviousExpand(query []interface{}, params bfv.Parameters,
 			defer wg.Done()
 			switch query[j].(type) {
 			case *rlwe.Ciphertext:
-				expanded[j] = invNTTforExpand(evt.Expand(query[j].(*rlwe.Ciphertext), logm, 0), Kd, params.RingQ())
+				expanded[j] = invNTTforExpand(evt.ShallowCopy().Expand(query[j].(*rlwe.Ciphertext), logm, 0), Kd, box.Params.RingQ())
 			case int:
 				expanded[j] = query[j]
 			default:
 				panic(fmt.Sprintf("Unknown type in %T", query[j]))
 			}
-		}(j, evt.ShallowCopy())
-	}
-	wg.Wait()
-	return expanded, err
-}
-
-func (PS *PIRServer) ObliviousExpandVanilla(query []interface{}, params bfv.Parameters, rtKeys *rlwe.RotationKeySet, dimentions, Kd int) ([]interface{}, error) {
-	//Procedure 7 from https://eprint.iacr.org/2019/1483.pdf
-	logm := int(math.Ceil(math.Log2(float64(Kd))))
-	fmt.Println("		to be expanded = ", logm)
-	galoisEl := params.GaloisElementForExpand(logm)
-	newRtKeys := rlwe.NewRotationKeySet(params.Parameters, galoisEl)
-	for k, _ := range newRtKeys.Keys {
-		newRtKeys.Keys[k] = rtKeys.Keys[k]
-	}
-	evt := rlwe.NewEvaluator(params.Parameters, &rlwe.EvaluationKey{Rtks: newRtKeys})
-	if len(query) != dimentions {
-		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", dimentions, len(query)))
-	}
-
-	if logm > params.LogN() {
-		return nil, errors.New("m > N is not allowed")
-	}
-	expanded := make([]interface{}, dimentions)
-	var err error
-	var wg sync.WaitGroup
-	for j := range query {
-		wg.Add(1)
-		go func(j int, evt *rlwe.Evaluator) {
-			defer wg.Done()
-			expanded[j] = invNTTforExpand(evt.Expand(query[j].(*rlwe.Ciphertext), logm, 0), Kd, params.RingQ())
-		}(j, evt.ShallowCopy())
+		}(j, evt)
 	}
 	wg.Wait()
 	return expanded, err
@@ -366,53 +374,14 @@ The query can be represented as:
     between all buckets in the server multiplied by the query. Ideally only one element in a certain bucket will survive
     the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
 */
-func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd *PIRQuery) ([]*rlwe.Ciphertext, error) {
-	pp, ok := PS.Profiles[queryRecvd.Id]
-	if !ok {
-		return nil, errors.New("Profile not found for given id")
-	}
-	//Initialize sampler from user seed
-	rand.Seed(queryRecvd.Seed)
-	keyPRNG := make([]byte, 64)
-	rand.Read(keyPRNG)
-	prng, err := utils2.NewKeyedPRNG(keyPRNG)
-	if err != nil {
-		return nil, err
-	}
-	sampler := ringqp.NewUniformSampler(prng, *box.Params.RingQP())
-	var query []interface{} //each entry is either an array of ciphertexts or directly the index to retrieve for this dimention for WPIR
-	switch queryRecvd.Q.(type) {
-	case []*PIRQueryItem:
-		var err error
-		if pp.Rtks == nil {
-			return nil, errors.New("Client needs to provide rotation keys for Expand")
-		}
-		queryDecompressed, err := DecompressCT(queryRecvd.Q, sampler, box.Params)
-		query, err = PS.ObliviousExpand(queryDecompressed, box.Params, pp.Rtks, queryRecvd.Dimentions, queryRecvd.Kd)
-		if err != nil {
-			return nil, err
-		}
-	case [][]*PIRQueryItem:
-		queryDecompressed, err := DecompressCT(queryRecvd.Q, sampler, box.Params)
-		if err != nil {
-			return nil, err
-		}
-		query = queryDecompressed
-	default:
-		return nil, errors.New(fmt.Sprintf("Query must be []*rlwe.Ciphertext or [][]*rlwe.Ciphertext, not %T", query))
-	}
-
-	if pp.Rlk == nil {
-		return nil, errors.New("Relinearization key for user is nil")
-	}
-
-	evt := bfv.NewEvaluator(box.Params, rlwe.EvaluationKey{Rlk: pp.Rlk})
+func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, query []interface{}, K, Kd, Dimentions int) ([]*rlwe.Ciphertext, error) {
+	evt := bfv.NewEvaluator(box.Params, rlwe.EvaluationKey{Rlk: box.Rlk})
 	ecd := bfv.NewEncoder(box.Params)
-	if queryRecvd.Kd != len(query[len(query)-1].([]*rlwe.Ciphertext)) {
-		return nil, errors.New(fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", queryRecvd.Kd, len(query[len(query)-1].([]*rlwe.Ciphertext))))
+	if Kd != len(query[len(query)-1].([]*rlwe.Ciphertext)) {
+		return nil, errors.New(fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", Kd, len(query[len(query)-1].([]*rlwe.Ciphertext))))
 	}
-	if queryRecvd.Dimentions != len(query) {
-		return nil, errors.New(fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", queryRecvd.Dimentions, len(query)))
+	if Dimentions != len(query) {
+		return nil, errors.New(fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", Dimentions, len(query)))
 	}
 
 	//spawnMultipliers
@@ -427,7 +396,7 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 	}
 
 	finalAnswer := make([]*rlwe.Ciphertext, 0)
-	for d := 0; d < queryRecvd.Dimentions; d++ {
+	for d := 0; d < Dimentions; d++ {
 		//loop over all dimentions of the hypercube
 
 		//fmt.Println("dimention ", d+1)
@@ -438,16 +407,17 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 		nextStore := NewPirStorage()
 		//builds access to storage in a recursive way
 		keys := make([]string, 0)
-		utils.GenKeysAtDepth("", d+1, queryRecvd.Dimentions, queryRecvd.Kd, &keys)
+		utils.GenKeysAtDepth("", d+1, Dimentions, Kd, &keys)
 
-		finalRound := d == queryRecvd.Dimentions-1
+		finalRound := d == Dimentions-1
 
-		numEffectiveKeys := 0                                     //keeps track of how many entries are effectively in storage at a given dim
-		numComputedKeys := 0                                      //keeps track of how many query x entry results have been computed in storage at a given dim
-		feedbackCh := make(chan int, queryRecvd.Kd*(len(keys)+1)) //+1 for final round when len(keys) is 0
+		numEffectiveKeys := 0                          //keeps track of how many entries are effectively in storage at a given dim
+		numComputedKeys := 0                           //keeps track of how many query x entry results have been computed in storage at a given dim
+		feedbackCh := make(chan int, Kd*(len(keys)+1)) //+1 for final round when len(keys) is 0
 		switch q.(type) {
 		case []*rlwe.Ciphertext:
-			for di := 0; di < queryRecvd.Kd; di++ {
+			//fmt.Printf("Dimention %d performing mul\n", d+1)
+			for di := 0; di < Kd; di++ {
 				//scan this dimention
 				//fmt.Println("Index: ", di)
 				//utils.ShowCoeffs(q[di], *box)
@@ -490,11 +460,8 @@ func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, queryRecvd
 							if err != nil {
 								panic(err.Error())
 							}
-						case []*bfv.PlaintextMul:
-							nextStore.Map[key] = make([]rlwe.Operand, len(v.([]*bfv.PlaintextMul)))
-							for i, pt := range v.([]*bfv.PlaintextMul) {
-								nextStore.Map[key][i] = pt
-							}
+						case []rlwe.Operand:
+							nextStore.Map[key] = v.([]rlwe.Operand)
 						default:
 							panic(fmt.Sprintf("Unknown type %T", v))
 						}

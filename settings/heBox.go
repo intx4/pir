@@ -1,59 +1,9 @@
 package settings
 
 import (
-	"errors"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 )
-
-var T = uint64(65537)
-var TUsableBits = 16
-
-/*
-poly_modulus_degree             | max coeff_modulus bit-length
-1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
-*/
-var QI = map[int]map[int][]int{
-	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
-	2: {
-		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
-		8192:  []int{35, 60},
-		16384: []int{35, 60},
-	},
-	3: {
-		8192:  []int{35, 60},
-		16384: []int{35, 60},
-	},
-}
-
-var QIforExp = map[int]map[int][]int{
-	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
-	2: {
-		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
-		8192:  []int{35, 45, 45, 45},
-		16384: []int{35, 45, 45, 45},
-	},
-	3: {
-		8192:  []int{35, 60, 60},
-		16384: []int{35, 60, 60},
-	},
-}
-
-var QIforWP = map[int]map[int][]int{
-	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
-	2: {
-		2048:  []int{35},
-		4096:  []int{35},
-		8192:  []int{35},
-		16384: []int{35},
-	},
-	3: {
-		2048:  []int{35},
-		4096:  []int{35},
-		8192:  []int{35},
-		16384: []int{35},
-	},
-}
 
 // Wraps all the struct necessary for BFV
 type HeBox struct {
@@ -65,31 +15,15 @@ type HeBox struct {
 	Enc    rlwe.Encryptor
 	Dec    rlwe.Decryptor
 	Evt    bfv.Evaluator
+	Rtks   *rlwe.RotationKeySet
+	Rlk    *rlwe.RelinearizationKey
 }
 
-func NewHeBox(logN, dimentions int, expansion bool, weaklyPrivate bool) (*HeBox, error) {
-	//to do: add checks at some point to make sure that depth is aligned with levels
-	var qi map[int]map[int][]int
-	var pi []int = nil
-	if expansion == true {
-		if !weaklyPrivate {
-			qi = QIforExp
-		} else {
-			qi = QIforWP
-		}
-	} else {
-		qi = QI
-	}
-	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
-		LogN: logN,
-		LogQ: qi[dimentions][1<<logN], //this is actually QP from the RNS BFV paper
-		LogP: pi,
-		T:    T,
-	})
-	if err != nil {
-		return nil, err
-	}
-	box := &HeBox{Params: params}
+func NewHeBox(params bfv.Parameters) (*HeBox, error) {
+	box := &HeBox{Params: params, Kgen: bfv.NewKeyGenerator(params)}
+	box.GenSk()
+	box.WithDecryptor(rlwe.NewDecryptor(params.Parameters, box.Sk))
+
 	return box, nil
 }
 
@@ -102,12 +36,23 @@ func (B *HeBox) WithKey(sk *rlwe.SecretKey) {
 	B.Sk = sk
 }
 
-func (B *HeBox) GenRelinKey() (*rlwe.RelinearizationKey, error) {
+func (B *HeBox) GenSk() *rlwe.SecretKey {
+	B.Sk = B.Kgen.GenSecretKey()
+	return B.Sk
+}
+
+func (B *HeBox) GenRelinKey() *rlwe.RelinearizationKey {
 	if B.Sk == nil {
-		return nil, errors.New("Sk is not initialized")
+		panic("Sk is not initialized")
 	}
-	rlk := B.Kgen.GenRelinearizationKey(B.Sk, 3)
-	return rlk, nil
+	B.Rlk = B.Kgen.GenRelinearizationKey(B.Sk, 3)
+	return B.Rlk
+}
+
+func (B *HeBox) GenRtksKeys() *rlwe.RotationKeySet {
+	galoisElts := B.Params.GaloisElementForExpand(B.Params.LogN())
+	B.Rtks = B.Kgen.GenRotationKeys(galoisElts, B.Sk)
+	return B.Rtks
 }
 
 func (B *HeBox) WithKeyGenerator(kgen rlwe.KeyGenerator) {

@@ -5,9 +5,9 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
-	"github.com/stretchr/testify/require"
-	"github.com/tuneinsight/lattigo/v4/rlwe"
+	"github.com/tuneinsight/lattigo/v4/bfv"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"pir"
@@ -20,87 +20,37 @@ import (
 )
 
 var DEBUG = true
+var DIR = os.ExpandEnv("$HOME/pir/test/data/")
+var ListOfEntries = []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
+var Sizes = []int{30 * 8, 188 * 8, 288 * 8}
 
-func TestClientQueryGenNoExpansion(t *testing.T) {
-	items := []int{1 << 10, 1 << 12, 1 << 14, 1 << 16}
-	sizes := []int{30 * 8, 150 * 8, 250 * 8}
-
-	for _, item := range items {
-		for _, size := range sizes {
-			//fake db
-			keys := make([][]byte, item)
-			values := make([][]byte, item)
-			for i := range keys {
-				keys[i] = RandByteString(100)
-				values[i] = RandByteString(size / 8)
-			}
-			for _, dimentions := range []int{2, 3} {
-				for _, logN := range []int{13, 14} {
-					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, false, false)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now we create a new client instance
-					client := pir.NewPirClient(box, 1)
-
-					//the client should provide the params to the server
-					//the server here creates a context using the info about the DB and params
-					ctx, err := settings.NewPirContext(item, size, box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					choice := rand.Int() % len(keys)
-					query, err := client.QueryGen(keys[choice], ctx, dimentions, pir.NONE, false, false)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					_, choosenIdx := utils.MapKeyToDim(keys[choice], query.Kd, query.Dimentions)
-
-					//this part is actually done at server
-					sampler, err := pir.NewSampler(query.Seed, client.Box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					for d, di := range choosenIdx {
-						q := query.Q.([][]*pir.PIRQueryItem)[d]
-						for i, ctc := range q {
-							ct, err := pir.DecompressCT(ctc, *sampler, client.Box.Params)
-							if err != nil {
-								t.Fatalf(err.Error())
-							}
-							pt := client.Box.Dec.DecryptNew(ct[0].(*rlwe.Ciphertext))
-							v := client.Box.Ecd.DecodeUintNew(pt)
-							if i == di {
-								for _, n := range v {
-									if n != uint64(1) {
-										t.Fatalf("Expected 1 got %d at index %d", n, di)
-									}
-								}
-							} else {
-								for _, n := range v {
-									if n != uint64(0) {
-										t.Fatalf("Expected 0 got %d at index %d", n, di)
-									}
-								}
-							}
-						}
-					}
-				}
-			}
+func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivate bool, leakage int) {
+	csvFile := new(os.File)
+	var err error
+	if !weaklyPrivate || (weaklyPrivate && leakage == 1) {
+		os.Remove(path)
+		csvFile, err = os.Create(path)
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	} else if weaklyPrivate && leakage == 2 {
+		csvFile, err = os.OpenFile(path, os.O_APPEND, 0644)
+		if err != nil {
+			t.Fatalf(err.Error())
 		}
 	}
-}
+	csvW := csv.NewWriter(csvFile)
 
-func TestClientQueryGenWithExpansion(t *testing.T) {
-	items := []int{1 << 10, 1 << 12, 1 << 14, 1 << 16}
-	sizes := []int{30 * 8, 150 * 8, 250 * 8}
+	defer csvFile.Close()
 
-	for _, item := range items {
-		for _, size := range sizes {
+	headers := []string{"entries", "size", "d", "n", "ecd_time", "ecd_size", "query_gen_time", "answer_gen_time", "answer_get_time", "tot_time", "query_size", "answer_size", "leakedBits", "informationBits"}
+	csvW.Write(headers)
+
+	for _, entries := range ListOfEntries {
+		for _, size := range Sizes {
 			//fake db
-			keys := make([]string, item)
-			values := make([][]byte, item)
+			keys := make([]string, entries)
+			values := make([][]byte, entries)
 			db := make(map[string][]byte)
 			for i := 0; i < len(keys); {
 				keys[i] = string(RandByteString(100))
@@ -110,159 +60,119 @@ func TestClientQueryGenWithExpansion(t *testing.T) {
 					i++
 				}
 			}
-			for _, dimentions := range []int{2, 3} {
+			for _, dimentions := range []int{2} {
 				for _, logN := range []int{13, 14} {
 					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true, false)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
+					params := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
 					//now we create a new client instance
-					client := pir.NewPirClient(box, 1)
+					client := pir.NewPirClient([]bfv.Parameters{params}, "1")
 					//now we create a profile which contains all the params and keys needed to server
-					profile, err := client.GenProfile()
+					profile := client.GenProfile()
+
+					server := pir.NewPirServer()
+					server.AddProfile(profile)
+					serverBox, err := server.WithParams(profile.ClientId, profile.CryptoParams[0].ParamsId)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					server := pir.NewPirServer()
-
 					//now the server is able to create a context with the params provided by client
-					ctx, err := settings.NewPirContext(item, size, box.Params)
+					ctx, err := settings.NewPirContext(entries, size, serverBox.Params, profile.CryptoParams[0].ParamsId)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
 					choice := rand.Int() % len(keys)
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, false, true)
+					start := time.Now()
+					query, leakedBits, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, weaklyPrivate, expansion)
+					queryGenTime := time.Since(start).Seconds()
+					clientBox := client.SetsOfBox[utils.FormatParams(params)]
+					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					_, choosenIdx := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
-
-					//this part is actually done at server
-					sampler, err := pir.NewSampler(query.Seed, client.Box.Params)
+					//server encodes its storage into plaintexts
+					start = time.Now()
+					queryProc, err := server.ProcessPIRQuery(query, serverBox)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-
-					queryDecomp, err := pir.DecompressCT(query.Q, *sampler, box.Params)
+					ecdStorage, err := server.Encode(query.K, query.Kd, query.Dimentions, ctx, serverBox, queryProc, db)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-
-					queryExpanded, err := server.ObliviousExpand(queryDecomp, box.Params, profile.Rtks, query.Dimentions, query.Kd)
-					for d, di := range choosenIdx {
-						q := queryExpanded[d]
-						for i, ct := range q.([]*rlwe.Ciphertext) {
-							pt := client.Box.Dec.DecryptNew(ct)
-							v := client.Box.Ecd.DecodeUintNew(pt)
-							if i == di {
-								for _, n := range v {
-									if n != uint64(1) {
-										t.Fatalf("Expected 1 got %d at index %d", n, di)
-									}
-								}
-							} else {
-								for _, n := range v {
-									if n != uint64(0) {
-										t.Fatalf("Expected 0 got %d at index %d", n, di)
-									}
-								}
-							}
+					ecdTime := time.Since(start).Seconds()
+					ecdSize := 0
+					ecdStorageAsMap := make(map[string]*pir.PIREntry)
+					ecdStorage.Range(func(key, value any) bool {
+						ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
+						return true
+					})
+					for _, e := range ecdStorageAsMap {
+						serialized, err := json.Marshal(e)
+						ecdSize += len(serialized)
+						if err != nil {
+							t.Fatalf(err.Error())
 						}
 					}
-				}
-			}
-		}
-	}
-}
 
-func TestClientQueryWeaklyPrivate(t *testing.T) {
-	items := []int{1 << 10, 1 << 12, 1 << 14, 1 << 16}
-	sizes := []int{30 * 8, 150 * 8, 250 * 8}
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					//server creates the answer. Note we need to pass the relin key as well
+					if DEBUG {
+						serverBox.Dec = clientBox.Dec
+					}
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					start = time.Now()
+					answerEnc, err := server.AnswerGen(ecdStorage, serverBox, queryProc, query.K, query.Kd, query.Dimentions)
+					answerGenTime := time.Since(start).Seconds()
 
-	for _, item := range items {
-		for _, size := range sizes {
-			//fake db
-			keys := make([]string, item)
-			values := make([][]byte, item)
-			db := make(map[string][]byte)
-			for i := 0; i < len(keys); {
-				keys[i] = string(RandByteString(100))
-				values[i] = RandByteString(size / 8)
-				if _, ok := db[keys[i]]; !ok {
-					db[keys[i]] = values[i]
-					i++
-				}
-			}
-			for _, dimentions := range []int{2, 3} {
-				for _, logN := range []int{13, 14} {
-					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true, false)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					//now we create a new client instance
-					client := pir.NewPirClient(box, 1)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now we create a profile which contains all the params and keys needed to server
-					profile, err := client.GenProfile()
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					server := pir.NewPirServer()
+					//extract the answer
+					start = time.Now()
+					answerPt, err := client.AnswerGet(answerEnc, clientBox)
+					answerGetTime := time.Since(start).Seconds()
 
-					//now the server is able to create a context with the params provided by client
-					ctx, err := settings.NewPirContext(item, size, box.Params)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					choice := rand.Int() % len(keys)
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, true, true)
+					expected, _ := server.Store.Load(choosenKey)
+					if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
+						fmt.Println("Want")
+						fmt.Println(expected.(*pir.PIREntry).Value)
+						fmt.Println("Got")
+						fmt.Println(answerPt)
+						t.Fatalf("Answer does not match expected")
+					}
+					qs, err := json.Marshal(query)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					_, choosenIdx := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
-
-					//this part is actually done at server
-					sampler, err := pir.NewSampler(query.Seed, client.Box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-
-					queryDecomp, err := pir.DecompressCT(query.Q, *sampler, box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-
-					queryExpanded, err := server.ObliviousExpand(queryDecomp, box.Params, profile.Rtks, query.Dimentions, query.Kd)
-					for d, di := range choosenIdx {
-						q := queryExpanded[d]
-						switch q.(type) {
-						case []*rlwe.Ciphertext:
-							for i, ct := range q.([]*rlwe.Ciphertext) {
-								pt := client.Box.Dec.DecryptNew(ct)
-								v := client.Box.Ecd.DecodeUintNew(pt)
-								if i == di {
-									for _, n := range v {
-										if n != uint64(1) {
-											t.Fatalf("Expected 1 got %d at index %d", n, di)
-										}
-									}
-								} else {
-									for _, n := range v {
-										if n != uint64(0) {
-											t.Fatalf("Expected 0 got %d at index %d", n, di)
-										}
-									}
-								}
-							}
-						case int:
-							require.Equal(t, di, q.(int))
-							break
+					querySize := len(qs)
+					answerSize := 0
+					for _, a := range answerEnc {
+						serialized, err := a.MarshalBinary()
+						answerSize += len(serialized)
+						if err != nil {
+							t.Fatalf(err.Error())
 						}
 					}
+
+					records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %f, %f, %f, %d, %d,%f, %f", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize, leakedBits, math.Log2(float64(ctx.DBItems)))
+					err = csvW.Write(strings.Split(records, ","))
+					if err != nil {
+						t.Logf(err.Error())
+					}
+					csvW.Flush()
+					err = csvW.Error()
+					if err != nil {
+						t.Logf(err.Error())
+					}
+					records = fmt.Sprintf("Entries : %d, Size : %d, Dimentions : %d, N: %d, Ecd Time : %f, Ecd Size : %d, Query Gen Time : %f, Answer Gen Time : %f, Answer Get Time : %f, Tot Time : %f, Query Size : %d, Answer Size : %d, Leaked Bits : %f / %f", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize, leakedBits, math.Log2(float64(ctx.DBItems)))
+					log.Println(records)
 				}
 			}
 		}
@@ -271,464 +181,23 @@ func TestClientQueryWeaklyPrivate(t *testing.T) {
 
 func TestClientRetrieval(t *testing.T) {
 	//DB dimentions
-	os.Chdir(os.ExpandEnv("$HOME/pir"))
+	os.Chdir(DIR)
 	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
-
-	listOfEntries := []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
-	sizes := []int{30 * 8, 188 * 8, 288 * 8}
-
-	path := os.ExpandEnv("$HOME/GolandProjects/pir/test/data/pirGo.csv")
-	os.Remove(path)
-	csvFile, err := os.Create(path)
-	if err != nil {
-		t.Fatalf(err.Error())
+	testCases := []struct {
+		name          string
+		path          string
+		expansion     bool
+		weaklyPrivate bool
+		leakage       int
+	}{
+		{"No Expansion", "pirGo.csv", false, false, 0},
+		{"Expansion", "pirGoExp.csv", true, false, 0},
+		{"WPIR STD", "pirGoWP.csv", true, true, 1},
+		{"WPIR STD", "pirGoWP.csv", true, true, 2},
 	}
-	csvW := csv.NewWriter(csvFile)
-
-	defer csvFile.Close()
-
-	headers := []string{"entries", "size", "d", "n", "ecd_time", "ecd_size", "query_gen_time", "answer_gen_time", "answer_get_time", "tot_time", "query_size", "answer_size"}
-	csvW.Write(headers)
-
-	for _, entries := range listOfEntries {
-		for _, size := range sizes {
-			//fake db
-			keys := make([]string, entries)
-			values := make([][]byte, entries)
-			db := make(map[string][]byte)
-			for i := 0; i < len(keys); {
-				keys[i] = string(RandByteString(100))
-				values[i] = RandByteString(size / 8)
-				if _, ok := db[keys[i]]; !ok {
-					db[keys[i]] = values[i]
-					i++
-				}
-			}
-			for _, dimentions := range []int{2} {
-				for _, logN := range []int{13, 14} {
-					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, false, false)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now we create a new client instance
-					client := pir.NewPirClient(box, 1)
-					//now we create a profile which contains all the params and keys needed to server
-					profile, err := client.GenProfile()
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					server := pir.NewPirServer()
-					server.AddProfile(profile)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now the server is able to create a context with the params provided by client
-					ctx, err := settings.NewPirContext(entries, size, box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					choice := rand.Int() % len(keys)
-					start := time.Now()
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, false, false)
-					queryGenTime := time.Since(start).Seconds()
-					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//server encodes its storage into plaintexts
-					start = time.Now()
-					ecdStorage, serverBox, err := server.Encode(ctx, query, db)
-					ecdTime := time.Since(start).Seconds()
-					ecdSize := 0
-					ecdStorageAsMap := make(map[string]*pir.PIREntry)
-					ecdStorage.Range(func(key, value any) bool {
-						ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
-						return true
-					})
-					for _, e := range ecdStorageAsMap {
-						serialized, err := json.Marshal(e)
-						ecdSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//server creates the answer. Note we need to pass the relin key as well
-					if DEBUG {
-						serverBox.Dec = client.Box.Dec
-					}
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					start = time.Now()
-					answerEnc, err := server.AnswerGen(ecdStorage, serverBox, query)
-					answerGenTime := time.Since(start).Seconds()
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//extract the answer
-					start = time.Now()
-					answerPt, err := client.AnswerGet(answerEnc)
-					answerGetTime := time.Since(start).Seconds()
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					expected, _ := server.Store.Load(choosenKey)
-					if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
-						fmt.Println("Want")
-						fmt.Println(expected.(*pir.PIREntry).Value)
-						fmt.Println("Got")
-						fmt.Println(answerPt)
-						t.Fatalf("Answer does not match expected")
-					}
-					querySize := 0
-					for _, q := range query.Q.([][]*pir.PIRQueryItem) {
-						serialized, err := q[0].MarshalBinary()
-						querySize += len(serialized) * len(q)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-					answerSize := 0
-					for _, a := range answerEnc {
-						serialized, err := a.MarshalBinary()
-						answerSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-
-					records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %f, %f, %f, %d, %d", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
-					err = csvW.Write(strings.Split(records, ","))
-					if err != nil {
-						t.Logf(err.Error())
-					}
-					csvW.Flush()
-					err = csvW.Error()
-					if err != nil {
-						t.Logf(err.Error())
-					}
-					records = fmt.Sprintf("Entries : %d, Size : %d, Dimentions : %d, N: %d, Ecd Time : %f, Ecd Size : %d, Query Gen Time : %f, Answer Gen Time : %f, Answer Get Time : %f, Tot Time : %f, Query Size : %d, Answer Size : %d", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
-					log.Println(records)
-				}
-			}
-		}
-	}
-}
-
-func TestClientRetrievalWithExpansion(t *testing.T) {
-	//DB dimentions
-	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
-
-	listOfEntries := []int{1 << 14, 1 << 16, 1 << 18, 1 << 20}
-	sizes := []int{30 * 8, 188 * 8, 288 * 8}
-
-	path := os.ExpandEnv("$HOME/pir/test/data/pirGoExpansion.csv")
-	os.Remove(path)
-	csvFile, err := os.Create(path)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	csvW := csv.NewWriter(csvFile)
-
-	defer csvFile.Close()
-
-	headers := []string{"entries", "size", "d", "n", "ecd_time", "ecd_size", "query_gen_time", "answer_gen_time", "answer_get_time", "tot_time", "query_size", "answer_size"}
-	csvW.Write(headers)
-
-	for _, entries := range listOfEntries {
-		for _, size := range sizes {
-			//fake db
-			keys := make([]string, entries)
-			values := make([][]byte, entries)
-			db := make(map[string][]byte)
-			for i := 0; i < len(keys); {
-				keys[i] = string(RandByteString(100))
-				values[i] = RandByteString(size / 8)
-				if _, ok := db[keys[i]]; !ok {
-					db[keys[i]] = values[i]
-					i++
-				}
-			}
-			for _, dimentions := range []int{2} {
-				for _, logN := range []int{13, 14} {
-					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true, false)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now we create a new client instance
-					client := pir.NewPirClient(box, 1)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now we create a profile which contains all the params and keys needed to server
-					profile, err := client.GenProfile()
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					server := pir.NewPirServer()
-					server.AddProfile(profile)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now the server is able to create a context with the params provided by client
-					ctx, err := settings.NewPirContext(entries, size, box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					choice := rand.Int() % len(keys)
-					start := time.Now()
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.NONE, false, true)
-					queryGenTime := time.Since(start).Seconds()
-					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//server encodes its storage into plaintexts
-					start = time.Now()
-					ecdStorage, serverBox, err := server.Encode(ctx, query, db)
-					ecdTime := time.Since(start).Seconds()
-					ecdSize := 0
-					ecdStorageAsMap := make(map[string]*pir.PIREntry)
-					ecdStorage.Range(func(key, value any) bool {
-						ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
-						return true
-					})
-					for _, e := range ecdStorageAsMap {
-						serialized, err := json.Marshal(e)
-						ecdSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//server creates the answer. Note we need to pass the relin key as well
-					if DEBUG {
-						serverBox.Dec = client.Box.Dec
-					}
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					start = time.Now()
-					answerEnc, err := server.AnswerGen(ecdStorage, serverBox, query)
-					answerGenTime := time.Since(start).Seconds()
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//extract the answer
-					start = time.Now()
-					answerPt, err := client.AnswerGet(answerEnc)
-					answerGetTime := time.Since(start).Seconds()
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					expected, _ := server.Store.Load(choosenKey)
-					if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
-						fmt.Println("Want")
-						fmt.Println(expected.(*pir.PIREntry).Value)
-						fmt.Println("Got")
-						fmt.Println(answerPt)
-						t.Fatalf("Answer does not match expected")
-					}
-					querySize := 0
-					for _, q := range query.Q.([]*pir.PIRQueryItem) {
-						serialized, err := q.MarshalBinary()
-						querySize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-					answerSize := 0
-					for _, a := range answerEnc {
-						serialized, err := a.MarshalBinary()
-						answerSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-
-					records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %f, %f, %f, %d, %d", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
-					err = csvW.Write(strings.Split(records, ","))
-					if err != nil {
-						t.Logf(err.Error())
-					}
-					csvW.Flush()
-					err = csvW.Error()
-					if err != nil {
-						t.Logf(err.Error())
-					}
-					records = fmt.Sprintf("Entries : %d, Size : %d, Dimentions : %d, N: %d, Ecd Time : %f, Ecd Size : %d, Query Gen Time : %f, Answer Gen Time : %f, Answer Get Time : %f, Tot Time : %f, Query Size : %d, Answer Size : %d", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
-					log.Println(records)
-				}
-			}
-		}
-	}
-}
-
-func TestClientRetrievalWP(t *testing.T) {
-	//DB dimentions
-	log.Println("Starting test. NumThreads = ", runtime.NumCPU())
-
-	listOfEntries := []int{1 << 20}
-	sizes := []int{30 * 8, 188 * 8, 288 * 8}
-
-	path := os.ExpandEnv("$HOME/pir/test/data/pirGoWP.csv")
-	os.Remove(path)
-	csvFile, err := os.Create(path)
-	if err != nil {
-		t.Fatalf(err.Error())
-	}
-	csvW := csv.NewWriter(csvFile)
-
-	defer csvFile.Close()
-
-	headers := []string{"entries", "size", "d", "n", "ecd_time", "ecd_size", "query_gen_time", "answer_gen_time", "answer_get_time", "tot_time", "query_size", "answer_size"}
-	csvW.Write(headers)
-
-	for _, entries := range listOfEntries {
-		for _, size := range sizes {
-			//fake db
-			keys := make([]string, entries)
-			values := make([][]byte, entries)
-			db := make(map[string][]byte)
-			for i := 0; i < len(keys); {
-				keys[i] = string(RandByteString(100))
-				values[i] = RandByteString(size / 8)
-				if _, ok := db[keys[i]]; !ok {
-					db[keys[i]] = values[i]
-					i++
-				}
-			}
-			for _, dimentions := range []int{2} {
-				for _, logN := range []int{12, 13, 14} {
-					//first we create some parameters
-					box, err := settings.NewHeBox(logN, dimentions, true, true)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now we create a new client instance
-					client := pir.NewPirClient(box, 1)
-					//now we create a profile which contains all the params and keys needed to server
-					profile, err := client.GenProfile()
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					server := pir.NewPirServer()
-					server.AddProfile(profile)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//now the server is able to create a context with the params provided by client
-					ctx, err := settings.NewPirContext(entries, size, box.Params)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					choice := rand.Int() % len(keys)
-					start := time.Now()
-					query, err := client.QueryGen([]byte(keys[choice]), ctx, dimentions, pir.STANDARD, true, true)
-					queryGenTime := time.Since(start).Seconds()
-					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), query.Kd, query.Dimentions)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//server encodes its storage into plaintexts
-					start = time.Now()
-					ecdStorage, serverBox, err := server.Encode(ctx, query, db)
-					ecdTime := time.Since(start).Seconds()
-					ecdSize := 0
-					ecdStorageAsMap := make(map[string]*pir.PIREntry)
-					ecdStorage.Range(func(key, value any) bool {
-						ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
-						return true
-					})
-					for _, e := range ecdStorageAsMap {
-						serialized, err := json.Marshal(e)
-						ecdSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//server creates the answer. Note we need to pass the relin key as well
-					if DEBUG {
-						serverBox.Dec = client.Box.Dec
-					}
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					start = time.Now()
-					answerEnc, err := server.AnswerGen(ecdStorage, serverBox, query)
-					answerGenTime := time.Since(start).Seconds()
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					//extract the answer
-					start = time.Now()
-					answerPt, err := client.AnswerGet(answerEnc)
-					answerGetTime := time.Since(start).Seconds()
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					expected, _ := server.Store.Load(choosenKey)
-					if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
-						fmt.Println("Want")
-						fmt.Println(expected.(*pir.PIREntry).Value)
-						fmt.Println("Got")
-						fmt.Println(answerPt)
-						t.Fatalf("Answer does not match expected")
-					}
-					querySize := 0
-					for _, q := range query.Q.([]*pir.PIRQueryItem) {
-						serialized, err := q.MarshalBinary()
-						querySize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-					answerSize := 0
-					for _, a := range answerEnc {
-						serialized, err := a.MarshalBinary()
-						answerSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
-					}
-
-					records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %f, %f, %f, %d, %d", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
-					err = csvW.Write(strings.Split(records, ","))
-					if err != nil {
-						t.Logf(err.Error())
-					}
-					csvW.Flush()
-					err = csvW.Error()
-					if err != nil {
-						t.Logf(err.Error())
-					}
-					records = fmt.Sprintf("Entries : %d, Size : %d, Dimentions : %d, N: %d, Ecd Time : %f, Ecd Size : %d, Query Gen Time : %f, Answer Gen Time : %f, Answer Get Time : %f, Tot Time : %f, Query Size : %d, Answer Size : %d", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, answerGenTime, answerGetTime, ecdTime+queryGenTime+answerGenTime+answerGetTime, querySize, answerSize)
-					log.Println(records)
-				}
-			}
-		}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			testClientRetrieval(t, tc.path, tc.expansion, tc.weaklyPrivate, tc.leakage)
+		})
 	}
 }
