@@ -284,3 +284,7 @@ func ShowCoeffs(ct *rlwe.Ciphertext, decryptor rlwe.Decryptor, ecd bfv.Encoder, 
 func FormatParams(params bfv.Parameters) string {
 	return strconv.FormatInt(int64(params.LogN()), 10) + "|" + strconv.FormatInt(int64(params.LogP()+params.LogQ()), 10)
 }
+
+func FormatSizeForHyperCube(items, size, logN, dimentions int) string {
+	return strconv.FormatInt(int64(items), 10) + "|" + strconv.FormatInt(int64(size), 10) + "|" + strconv.FormatInt(int64(logN), 10) + "|" + strconv.FormatInt(int64(dimentions), 10)
+}

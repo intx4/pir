@@ -2,10 +2,8 @@ package pir
 
 import (
 	"errors"
-	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
-	"log"
 	"math"
 	"math/rand"
 	"pir/settings"
@@ -13,33 +11,21 @@ import (
 )
 
 type PIRClient struct {
-	SetsOfBox map[string]*settings.HeBox
-	Id        string
+	B  *settings.HeBox
+	Id string
 }
 
-func NewPirClient(setsOfParams []bfv.Parameters, id string) *PIRClient {
+func NewPirClient(params bfv.Parameters, id string) *PIRClient {
 	client := new(PIRClient)
 	client.Id = id
-	client.SetsOfBox = make(map[string]*settings.HeBox)
-	for _, params := range setsOfParams {
-		b, _ := settings.NewHeBox(params)
-		client.SetsOfBox[utils.FormatParams(params)] = b
-	}
+	client.B, _ = settings.NewHeBox(params)
+	client.B.GenSk()
 	return client
 }
 
 // Creates a new profile to be sent to server
 func (PC *PIRClient) GenProfile() *settings.PIRProfile {
-	pp := &settings.PIRProfile{ClientId: PC.Id, CryptoParams: make([]settings.PIRCryptoParams, len(PC.SetsOfBox))}
-	i := 0
-	for k, b := range PC.SetsOfBox {
-		pp.CryptoParams[i] = settings.PIRCryptoParams{
-			Params:   b.Params.ParametersLiteral(),
-			Rlk:      b.GenRelinKey(),
-			Rtks:     b.GenRtksKeys(),
-			ParamsId: k,
-		}
-	}
+	pp := &settings.PIRProfile{ClientId: PC.Id, Rlk: PC.B.GenRelinKey(), Rtks: PC.B.GenRtksKeys()}
 	return pp
 }
 
@@ -50,29 +36,24 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, dimentions, leakage int, weaklyPrivate, compressed bool) (*PIRQuery, float64, error) {
+func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, leakage int, weaklyPrivate, compressed bool) (*PIRQuery, float64, error) {
 	//new seeded prng
 	seed := rand.Int63n(1<<63 - 1)
 	prng, err := NewPRNG(seed)
 	if err != nil {
 		panic(err)
 	}
-	box := PC.SetsOfBox[ctx.ParamsId]
-	box.WithEncoder(bfv.NewEncoder(box.Params))
+	box := PC.B
 	box.WithEncryptor(bfv.NewPRNGEncryptor(box.Params, box.Sk).WithPRNG(prng))
 	q := new(PIRQuery)
 	q.ClientId = PC.Id
-	q.ParamsId = ctx.ParamsId
 	q.Seed = seed
-	q.Dimentions = dimentions
-	q.K, q.Kd = settings.RoundUpToDim(float64(ctx.PackedDBSize-1), dimentions)
-
 	leakedBits := 0.0
 	if !weaklyPrivate {
 		if compressed {
-			q.Q, err = PC.compressedQueryGen(key, q.Kd, q.Dimentions, box)
+			q.Q, err = PC.compressedQueryGen(key, ctx.Kd, ctx.Dim, box)
 		} else {
-			q.Q, err = PC.queryGen(key, q.Kd, q.Dimentions, box)
+			q.Q, err = PC.queryGen(key, ctx, box)
 		}
 	} else {
 		if compressed == false {
@@ -83,15 +64,14 @@ func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, dimentions, 
 		}
 		s := 1.0
 		if leakage == STANDARDLEAKAGE {
-			s = math.Floor(float64(dimentions) / 2)
+			s = math.Floor(float64(ctx.Dim) / 2)
 		}
 		if leakage == HIGHLEAKAGE {
-			s = float64(dimentions - 1)
+			s = float64(ctx.Dim - 1)
 		}
-		TotBitsLeak := math.Log2(float64(ctx.DBItems))
-		leakedBits = (s / float64(dimentions)) * math.Log2(float64(q.K))
-		log.Println(fmt.Sprintf("WPIR: Leaking %f / %f", leakedBits, TotBitsLeak))
-		q.Q, err = PC.wpQueryGen(key, q.Kd, q.Dimentions, dimentions-1, box)
+
+		leakedBits = (s / float64(ctx.Dim)) * math.Log2(float64(ctx.K))
+		q.Q, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, ctx.Dim-1, box)
 	}
 	return q, leakedBits, err
 }
@@ -103,9 +83,10 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) queryGen(key []byte, Kd, dimentions int, box *settings.HeBox) ([][]*PIRQueryItem, error) {
-	if box.Ecd == nil || box.Enc == nil {
-		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
+func (PC *PIRClient) queryGen(key []byte, ctx *settings.PirContext, box *settings.HeBox) ([][]*PIRQueryItem, error) {
+	Kd, dimentions := ctx.Kd, ctx.Dim
+	if box.Ecd == nil || box.Enc == nil || box.Dec == nil {
+		return nil, errors.New("Client is not initialiazed with Encoder or Encryptor or Decryptor")
 	}
 	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
 	query := make([][]*PIRQueryItem, dimentions)
@@ -156,7 +137,8 @@ func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *set
 	return query, nil
 }
 
-func (PC *PIRClient) AnswerGet(answer []*rlwe.Ciphertext, box *settings.HeBox) ([]byte, error) {
+func (PC *PIRClient) AnswerGet(answer []*rlwe.Ciphertext) ([]byte, error) {
+	box := PC.B
 	res := make([]byte, 0)
 	for _, a := range answer {
 		decrypted := box.Dec.DecryptNew(a)

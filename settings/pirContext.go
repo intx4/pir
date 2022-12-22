@@ -3,19 +3,22 @@ package settings
 import (
 	"errors"
 	"github.com/davidkleiven/gononlin/nonlin"
-	"github.com/tuneinsight/lattigo/v4/bfv"
 	"math"
 	"pir/utils"
 )
 
+// keys is Items|Size|LogN|Dimentions|
+type PirContexts struct {
+	M map[string]PirContext `json:"M,omitempty"`
+}
+
 // Represents a context for the PIR scheme:
 type PirContext struct {
-	DBItems         int    `json:"db_items,omitempty"`
-	DBSize          int    `json:"db_size,omitempty"`
-	MaxBinSize      int    `json:"max_bin_size,omitempty"`
-	ExpectedBinSize int    `json:"expected_bin_size,omitempty"`
-	PackedDBSize    int    `json:"packed_db_size"`
-	ParamsId        string `json:"params_id,omitempty"`
+	K          int `json:"K,omitempty"`
+	Kd         int `json:"Kd,omitempty"`
+	Dim        int `json:"Dim,omitempty"`
+	ExpBinSize int `json:"ExpBinSize,omitempty"`
+	MaxBinSize int `json:"MaxBinSize,omitempty"`
 }
 
 // used for estimating bin size from https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
@@ -36,8 +39,8 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 }
 
 // Takes as input number of items in DB, bit size of items, and params
-func NewPirContext(Items int, Size int, params bfv.Parameters, paramsId string) (*PirContext, error) {
-	ctx := &PirContext{DBItems: Items, DBSize: Size, MaxBinSize: int(math.Floor(float64(TUsableBits*(1<<params.LogN())-1-int(math.Ceil(math.Log2(float64(params.N()*TUsableBits)/8)))) / float64(Size+8))), ParamsId: paramsId} //-2 for padding and length, +8 is 1 byte for separator "|"
+func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, error) {
+	ctx := &PirContext{MaxBinSize: int(math.Floor((float64(TUsableBits*N) - math.Log2(float64(TUsableBits*N)) - float64(3*TUsableBits)) / float64(Size+8)))} //- for padding and length, +8 is 1 byte for separator "|"
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := math.E
 	exp := 2.0
@@ -67,14 +70,15 @@ func NewPirContext(Items int, Size int, params bfv.Parameters, paramsId string) 
 			}
 		}
 		if math.Ceil((dc+1)*math.Log(K)) < float64(ctx.MaxBinSize) && dc != 0.0 {
-			ctx.ExpectedBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
-			ctx.PackedDBSize = int(math.Ceil(K))
+			ctx.ExpBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
+			ctx.K, ctx.Kd = RoundUpToDim(K, Dimentions)
+			ctx.Dim = Dimentions
 			break
 		}
 		maxIter--
 		exp += .1
 	}
-	if ctx.PackedDBSize == 0 {
+	if ctx.K == 0 {
 		return nil, errors.New("Could not estimate probabilistic bin size or right dimention split, try to adjust the BFV parameters")
 	}
 	return ctx, nil

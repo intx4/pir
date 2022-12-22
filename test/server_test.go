@@ -3,7 +3,6 @@ package test
 import (
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
-	"math/rand"
 	"pir"
 	"pir/settings"
 	"pir/utils"
@@ -31,49 +30,28 @@ func TestServerEncode(t *testing.T) {
 			}
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
-					params := settings.GetsParamForPIR(logN, dimentions, false, false, 0)
+					params := settings.GetsParamForPIR(logN, dimentions, false, false, pir.NONELEAKAGE)
 					server := pir.NewPirServer()
 					//let's verify that values are encoded as expected
-					server.AddProfile(&settings.PIRProfile{
-						CryptoParams: []settings.PIRCryptoParams{{
-							Params:   params.ParametersLiteral(),
-							ParamsId: utils.FormatParams(params),
-						}},
-						ClientId: "1",
-					})
-					ctx, err := settings.NewPirContext(item, size, params, utils.FormatParams(params))
-					K, Kd := settings.RoundUpToDim(float64(ctx.PackedDBSize), dimentions)
+					ctx, err := settings.NewPirContext(item, size, 1<<params.LogN(), dimentions)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-					mockQuery := &pir.PIRQuery{
-						Q:          nil,
-						Seed:       0,
-						K:          K,
-						Dimentions: dimentions,
-						Kd:         Kd,
-						ClientId:   "1",
-						ParamsId:   utils.FormatParams(params),
-					}
-					serverBox, err := server.WithParams(mockQuery.ClientId, mockQuery.ParamsId)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-
-					if ecdStore, err := server.Encode(mockQuery.K, mockQuery.Kd, mockQuery.Dimentions, ctx, serverBox, []interface{}{}, db); err != nil {
+					box, _ := settings.NewHeBox(params)
+					if ecdStore, err := server.Encode(ctx, []interface{}{}, db); err != nil {
 						t.Fatalf(err.Error())
 					} else {
 						ecdStorageAsMap := make(map[string][]rlwe.Operand)
 						ecdStore.Range(func(key, value any) bool {
-							ecdStorageAsMap[key.(string)], _ = value.(*pir.PIREntry).Encode(settings.TUsableBits, serverBox.Ecd.ShallowCopy(), params)
+							ecdStorageAsMap[key.(string)], _ = value.(*pir.PIREntry).Encode(settings.TUsableBits, box.Ecd.ShallowCopy(), params)
 							return true
 						})
 						for k, v := range ecdStorageAsMap {
 							entryFromDb, _ := server.Store.Load(k)
 							expected := entryFromDb.(*pir.PIREntry).Coalesce()
-							actual := serverBox.Ecd.DecodeUintNew(v[0].(*bfv.PlaintextMul))
+							actual := box.Ecd.DecodeUintNew(v[0].(*bfv.PlaintextMul))
 							for i := 1; i < len(v); i++ {
-								actual = append(actual, serverBox.Ecd.DecodeUintNew(v[i])...)
+								actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)
 							}
 							actualBytes, err := utils.Unchunkify(actual, settings.TUsableBits)
 							if err != nil {
@@ -114,61 +92,28 @@ func TestServerEncodeWPIR(t *testing.T) {
 			}
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
-					params := settings.GetsParamForPIR(logN, dimentions, true, true, 2)
+					params := settings.GetsParamForPIR(logN, dimentions, true, true, pir.HIGHLEAKAGE)
 					server := pir.NewPirServer()
 					//let's verify that values are encoded as expected
-					server.AddProfile(&settings.PIRProfile{
-						CryptoParams: []settings.PIRCryptoParams{{
-							Params:   params.ParametersLiteral(),
-							ParamsId: utils.FormatParams(params),
-						}},
-						ClientId: "1",
-					})
-					ctx, err := settings.NewPirContext(item, size, params, utils.FormatParams(params))
-					K, Kd := settings.RoundUpToDim(float64(ctx.PackedDBSize), dimentions)
+					ctx, err := settings.NewPirContext(item, size, 1<<params.LogN(), dimentions)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
-
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					q := make([]interface{}, dimentions)
-					for i := 0; i < dimentions-1; i++ {
-						q[i] = int(rand.Int63n(int64(Kd)))
-					}
-					mockQuery := &pir.PIRQuery{
-						Q:          nil,
-						Seed:       0,
-						K:          K,
-						Dimentions: dimentions,
-						Kd:         Kd,
-						ClientId:   "",
-						ParamsId:   "",
-					}
-					serverBox, err := server.WithParams(mockQuery.ClientId, mockQuery.ParamsId)
-					queryProc, err := server.ProcessPIRQuery(mockQuery, serverBox)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					if ecdStore, err := server.Encode(mockQuery.K, mockQuery.Kd, mockQuery.Dimentions, ctx, serverBox, queryProc, db); err != nil {
+					box, _ := settings.NewHeBox(params)
+					if ecdStore, err := server.Encode(ctx, []interface{}{1, 2}, db); err != nil {
 						t.Fatalf(err.Error())
 					} else {
-						ecdStorageAsMap := make(map[string][]*bfv.PlaintextMul)
+						ecdStorageAsMap := make(map[string][]rlwe.Operand)
 						ecdStore.Range(func(key, value any) bool {
-							valueToStore := make([]*bfv.PlaintextMul, len(value.([]rlwe.Operand)))
-							for i, v := range value.([]rlwe.Operand) {
-								valueToStore[i] = v.(*bfv.PlaintextMul)
-							}
-							ecdStorageAsMap[key.(string)] = valueToStore
+							ecdStorageAsMap[key.(string)], _ = value.(*pir.PIREntry).Encode(settings.TUsableBits, box.Ecd, params)
 							return true
 						})
 						for k, v := range ecdStorageAsMap {
 							entryFromDb, _ := server.Store.Load(k)
 							expected := entryFromDb.(*pir.PIREntry).Coalesce()
-							actual := serverBox.Ecd.DecodeUintNew(v[0])
+							actual := box.Ecd.DecodeUintNew(v[0])
 							for i := 1; i < len(v); i++ {
-								actual = append(actual, serverBox.Ecd.DecodeUintNew(v[i])...)
+								actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)
 							}
 							actualBytes, err := utils.Unchunkify(actual, settings.TUsableBits)
 							if err != nil {

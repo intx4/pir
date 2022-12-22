@@ -20,10 +20,7 @@ type HeBox struct {
 }
 
 func NewHeBox(params bfv.Parameters) (*HeBox, error) {
-	box := &HeBox{Params: params, Kgen: bfv.NewKeyGenerator(params)}
-	box.GenSk()
-	box.WithDecryptor(rlwe.NewDecryptor(params.Parameters, box.Sk))
-
+	box := &HeBox{Params: params, Kgen: bfv.NewKeyGenerator(params), Ecd: bfv.NewEncoder(params)}
 	return box, nil
 }
 
@@ -34,10 +31,12 @@ func (B *HeBox) WithKeys(sk *rlwe.SecretKey, pk *rlwe.PublicKey) {
 
 func (B *HeBox) WithKey(sk *rlwe.SecretKey) {
 	B.Sk = sk
+	B.WithDecryptor(rlwe.NewDecryptor(B.Params.Parameters, sk))
 }
 
 func (B *HeBox) GenSk() *rlwe.SecretKey {
-	B.Sk = B.Kgen.GenSecretKey()
+	sk := B.Kgen.GenSecretKey()
+	B.WithKey(sk)
 	return B.Sk
 }
 

@@ -156,32 +156,28 @@ func (PS *PIRServer) Delete(key []byte, pos, Kd, dimentions int) error {
 func (PS *PIRServer) AddProfile(pf *settings.PIRProfile) {
 	PS.Profiles[pf.ClientId] = pf
 }
-func (PS *PIRServer) WithParams(clientId, paramsId string) (*settings.HeBox, error) {
+func (PS *PIRServer) WithParams(ctx *settings.PirContext, params bfv.Parameters, clientId string) (*settings.HeBox, error) {
 	//set up box from profile
 	box := new(settings.HeBox)
-	for _, p := range PS.Profiles[clientId].CryptoParams {
-		if p.ParamsId == paramsId {
-			params, err := bfv.NewParametersFromLiteral(p.Params)
-			if err != nil {
-				return nil, err
-			}
-			box = &settings.HeBox{
-				Params: params,
-				Ecd:    bfv.NewEncoder(params),
-				Evt: bfv.NewEvaluator(params, rlwe.EvaluationKey{
-					Rlk:  p.Rlk,
-					Rtks: p.Rtks,
-				}),
-				Rtks: p.Rtks,
+	if p, ok := PS.Profiles[clientId]; !ok {
+		return nil, errors.New(fmt.Sprintf("%s profile not found"))
+	} else {
+		box = &settings.HeBox{
+			Params: params,
+			Ecd:    bfv.NewEncoder(params),
+			Evt: bfv.NewEvaluator(params, rlwe.EvaluationKey{
 				Rlk:  p.Rlk,
-			}
+				Rtks: p.Rtks,
+			}),
+			Rtks: p.Rtks,
+			Rlk:  p.Rlk,
 		}
+		return box, nil
 	}
-	return box, nil
 }
 
 // Takes a PIRQuery, Returns an array of interfaces, where each element is either a []*rlwe.Ciphertext or an int that represents the index for that dimention
-func (PS *PIRServer) ProcessPIRQuery(queryRecvd *PIRQuery, box *settings.HeBox) ([]interface{}, error) {
+func (PS *PIRServer) ProcessPIRQuery(ctx *settings.PirContext, queryRecvd *PIRQuery, box *settings.HeBox) ([]interface{}, error) {
 	var query []interface{} //each entry is either an array of ciphertexts or directly the index to retrieve for this dimention for WPIR
 	//Initialize sampler from user seed
 	sampler, err := NewSampler(queryRecvd.Seed, box.Params)
@@ -196,7 +192,7 @@ func (PS *PIRServer) ProcessPIRQuery(queryRecvd *PIRQuery, box *settings.HeBox) 
 			return nil, errors.New("Client needs to provide rotation keys for Expand")
 		}
 		queryDecompressed, err := DecompressCT(queryRecvd.Q, *sampler, box.Params)
-		query, err = PS.ObliviousExpand(queryDecompressed, box, queryRecvd.Dimentions, queryRecvd.Kd)
+		query, err = PS.ObliviousExpand(queryDecompressed, box, ctx.Dim, ctx.Kd)
 		if err != nil {
 			return nil, err
 		}
@@ -212,7 +208,8 @@ func (PS *PIRServer) ProcessPIRQuery(queryRecvd *PIRQuery, box *settings.HeBox) 
 	return query, nil
 }
 
-func (PS *PIRServer) Encode(K, Kd, dimentions int, ctx *settings.PirContext, box *settings.HeBox, query []interface{}, db map[string][]byte) (*sync.Map, error) {
+func (PS *PIRServer) Encode(ctx *settings.PirContext, query []interface{}, db map[string][]byte) (*sync.Map, error) {
+	K, Kd, dimentions := ctx.K, ctx.Kd, ctx.Dim
 	maxCollisions := 0
 	l := 0
 	for _, v := range db {
@@ -269,7 +266,7 @@ func (PS *PIRServer) Encode(K, Kd, dimentions int, ctx *settings.PirContext, box
 	if tooBigErr != "" {
 		fmt.Println("	" + tooBigErr)
 	}
-	fmt.Printf("		Storage encoded in chunks :\n		Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n		Tot Keys: %d\n", maxCollisions, ctx.ExpectedBinSize, ctx.MaxBinSize, K)
+	fmt.Printf("		Storage encoded in chunks :\n		Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n		Tot Keys: %d\n", maxCollisions, ctx.ExpBinSize, ctx.MaxBinSize, K)
 	/*
 		ecdStore := new(sync.Map)
 
@@ -367,7 +364,8 @@ The query can be represented as:
     between all buckets in the server multiplied by the query. Ideally only one element in a certain bucket will survive
     the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
 */
-func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, query []interface{}, K, Kd, Dimentions int) ([]*rlwe.Ciphertext, error) {
+func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, query []interface{}, ctx *settings.PirContext) ([]*rlwe.Ciphertext, error) {
+	Kd, Dimentions := ctx.Kd, ctx.Dim
 	evt := bfv.NewEvaluator(box.Params, rlwe.EvaluationKey{Rlk: box.Rlk})
 	ecd := bfv.NewEncoder(box.Params)
 	if Kd != len(query[len(query)-1].([]*rlwe.Ciphertext)) {
