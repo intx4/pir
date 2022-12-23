@@ -21,11 +21,12 @@ import (
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
 var ListOfEntries = []int{1 << 14, 1 << 16, 1 << 18, 1 << 20, 1 << 24}
-var Sizes = []int{30 * 8, 188 * 8, 288 * 8}
+var Sizes = []int{30 * 8, 150 * 8, 288 * 8}
 
 func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivate bool, leakage int) {
 	csvFile := new(os.File)
 	var err error
+	skipHeader := false
 	if !weaklyPrivate || (weaklyPrivate && leakage == pir.STANDARDLEAKAGE) {
 		os.Remove(path)
 		csvFile, err = os.Create(path)
@@ -37,13 +38,16 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
+		skipHeader = true
 	}
 	csvW := csv.NewWriter(csvFile)
 
 	defer csvFile.Close()
 
 	headers := []string{"entries", "size", "max_entries", "d", "n", "ecd_time", "ecd_size", "query_gen_time", "query_size", "answer_gen_time", "answer_size", "answer_get_time", "tot_time", "online_time", "leakedBits", "informationBits"}
-	csvW.Write(headers)
+	if !skipHeader {
+		csvW.Write(headers)
+	}
 	/*
 		HC := new(settings.HyperCube)
 		file, err := os.ReadFile(DIR + "hypercube.json")
@@ -89,7 +93,8 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						params := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
 						ctx, err := settings.NewPirContext(maxEntries, size, params.N(), dimentions)
 						if err != nil {
-							t.Fatalf(err.Error())
+							t.Logf(err.Error())
+							continue
 						}
 						//now we create a new client instance
 						client := pir.NewPirClient(params, "1")
@@ -146,9 +151,6 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						if DEBUG {
 							serverBox.Dec = client.B.Dec
 						}
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
 						start = time.Now()
 						answerEnc, err := server.AnswerGen(ecdStorage, serverBox, queryProc, ctx)
 						answerGenTime := time.Since(start).Seconds()
@@ -162,7 +164,8 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						answerGetTime := time.Since(start).Seconds()
 
 						if err != nil {
-							t.Fatalf(err.Error())
+							t.Logf(err.Error())
+							continue
 						}
 						expected, _ := server.Store.Load(choosenKey)
 						if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {

@@ -81,5 +81,8 @@ func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, err
 	if ctx.K == 0 {
 		return nil, errors.New("Could not estimate probabilistic bin size or right dimention split, try to adjust the BFV parameters")
 	}
+	if ctx.Kd > N {
+		return nil, errors.New("Kd > N is not supported")
+	}
 	return ctx, nil
 }

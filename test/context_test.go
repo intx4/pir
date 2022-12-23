@@ -21,7 +21,7 @@ func TestContextGen(t *testing.T) {
 						t.Log(err.Error())
 						continue
 					}
-					fmt.Printf("LogN: %d, Keys Packed: %d, Items per bin: %d, Dim: %d, Tot db size : %f), Kd : %d\n\n", logN, ctx.K, ctx.MaxBinSize, d, float64(float64(ctx.K*ctx.MaxBinSize*size)/1e9), ctx.Kd)
+					fmt.Printf("LogN: %d, K: %d, Kd : %d, Items per bin: %d, Dim: %d, Tot db size : %f\n\n", logN, ctx.K, ctx.Kd, ctx.MaxBinSize, d, float64(float64(ctx.K*ctx.MaxBinSize*size)/1e9))
 					HC[strconv.FormatInt(int64(items), 10)+"|"+strconv.FormatInt(int64(size), 10)+"|"+strconv.FormatInt(int64(logN), 10)+"|"+strconv.FormatInt(int64(d), 10)] = *ctx
 				}
 			}

@@ -71,7 +71,7 @@ func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, leakage int,
 		}
 
 		leakedBits = (s / float64(ctx.Dim)) * math.Log2(float64(ctx.K))
-		q.Q, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, ctx.Dim-1, box)
+		q.Q, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, int(s), box)
 	}
 	return q, leakedBits, err
 }
