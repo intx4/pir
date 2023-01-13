@@ -1,4 +1,4 @@
-package pir
+package server
 
 import (
 	"errors"
@@ -8,6 +8,7 @@ import (
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"log"
 	"math"
+	"pir"
 	"pir/settings"
 	"pir/utils"
 	"runtime"
@@ -160,7 +161,7 @@ func (PS *PIRServer) WithParams(ctx *settings.PirContext, params bfv.Parameters,
 	//set up box from profile
 	box := new(settings.HeBox)
 	if p, ok := PS.Profiles[clientId]; !ok {
-		return nil, errors.New(fmt.Sprintf("%s profile not found"))
+		return nil, errors.New(fmt.Sprintf("%s profile not found", clientId))
 	} else {
 		box = &settings.HeBox{
 			Params: params,
@@ -177,27 +178,27 @@ func (PS *PIRServer) WithParams(ctx *settings.PirContext, params bfv.Parameters,
 }
 
 // Takes a PIRQuery, Returns an array of interfaces, where each element is either a []*rlwe.Ciphertext or an int that represents the index for that dimention
-func (PS *PIRServer) ProcessPIRQuery(ctx *settings.PirContext, queryRecvd *PIRQuery, box *settings.HeBox) ([]interface{}, error) {
+func (PS *PIRServer) ProcessPIRQuery(ctx *settings.PirContext, queryRecvd *pir.PIRQuery, box *settings.HeBox) ([]interface{}, error) {
 	var query []interface{} //each entry is either an array of ciphertexts or directly the index to retrieve for this dimention for WPIR
 	//Initialize sampler from user seed
-	sampler, err := NewSampler(queryRecvd.Seed, box.Params)
+	sampler, err := pir.NewSampler(queryRecvd.Seed, box.Params)
 	if err != nil {
 		return nil, err
 	}
 
 	switch queryRecvd.Q.(type) {
-	case []*PIRQueryItem:
+	case []*pir.PIRQueryItem:
 		var err error
 		if box.Rtks == nil {
 			return nil, errors.New("Client needs to provide rotation keys for Expand")
 		}
-		queryDecompressed, err := DecompressCT(queryRecvd.Q, *sampler, box.Params)
+		queryDecompressed, err := pir.DecompressCT(queryRecvd.Q, *sampler, box.Params)
 		query, err = PS.ObliviousExpand(queryDecompressed, box, ctx.Dim, ctx.Kd)
 		if err != nil {
 			return nil, err
 		}
-	case [][]*PIRQueryItem:
-		queryDecompressed, err := DecompressCT(queryRecvd.Q, *sampler, box.Params)
+	case [][]*pir.PIRQueryItem:
+		queryDecompressed, err := pir.DecompressCT(queryRecvd.Q, *sampler, box.Params)
 		if err != nil {
 			return nil, err
 		}

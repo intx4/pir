@@ -10,6 +10,8 @@ import (
 	"math/rand"
 	"os"
 	"pir"
+	Client "pir/client"
+	Server "pir/server"
 	"pir/settings"
 	"pir/utils"
 	"runtime"
@@ -97,11 +99,11 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 							continue
 						}
 						//now we create a new client instance
-						client := pir.NewPirClient(params, "1")
+						client := Client.NewPirClient(params, "1")
 						//now we create a profile which contains all the params and keys needed to server
 						profile := client.GenProfile()
 
-						server := pir.NewPirServer()
+						server := Server.NewPirServer()
 						server.AddProfile(profile)
 
 						choice := rand.Int() % len(keys)
@@ -131,9 +133,9 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						}
 						ecdTime := time.Since(start).Seconds()
 						ecdSize := 0
-						ecdStorageAsMap := make(map[string]*pir.PIREntry)
+						ecdStorageAsMap := make(map[string]*Server.PIREntry)
 						ecdStorage.Range(func(key, value any) bool {
-							ecdStorageAsMap[key.(string)] = value.(*pir.PIREntry)
+							ecdStorageAsMap[key.(string)] = value.(*Server.PIREntry)
 							return true
 						})
 						for _, e := range ecdStorageAsMap {
@@ -168,9 +170,9 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 							continue
 						}
 						expected, _ := server.Store.Load(choosenKey)
-						if bytes.Compare(expected.(*pir.PIREntry).Coalesce(), answerPt) != 0 {
+						if bytes.Compare(expected.(*Server.PIREntry).Coalesce(), answerPt) != 0 {
 							fmt.Println("Want")
-							fmt.Println(expected.(*pir.PIREntry).Value)
+							fmt.Println(expected.(*Server.PIREntry).Value)
 							fmt.Println("Got")
 							fmt.Println(answerPt)
 							t.Fatalf("Answer does not match expected")

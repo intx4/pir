@@ -38,7 +38,7 @@ func NewSampler(seed int64, params bfv.Parameters) (*ringqp.UniformSampler, erro
 
 // Uses a compression trick when ct is encrypted using sk rather than pk to reduce the size by 2
 type PIRQueryItem struct {
-	isPlain bool          `json:"isPlain"`
+	IsPlain bool          `json:"IsPlain"`
 	Idx     int           `json:"idx"`
 	C0      *ring.Poly    `json:"c_0,omitempty"`
 	Meta    rlwe.MetaData `json:"meta"`
@@ -66,7 +66,7 @@ func (PQ *PIRQueryItem) UnMarshalBinary(b []byte) error {
 
 func CompressCT(ct *rlwe.Ciphertext) *PIRQueryItem {
 	return &PIRQueryItem{
-		isPlain: false,
+		IsPlain: false,
 		C0:      ct.Value[0],
 		Meta:    ct.MetaData,
 		Lvl:     ct.Level(),
@@ -83,7 +83,7 @@ func DecompressCT(compressedCTs interface{}, sampler ringqp.UniformSampler, para
 	case []*PIRQueryItem:
 		decompressed := make([]interface{}, len(compressedCTs.([]*PIRQueryItem)))
 		for i, compressed := range compressedCTs.([]*PIRQueryItem) {
-			if compressed.isPlain {
+			if compressed.IsPlain {
 				decompressed[i] = compressed.Idx
 			} else {
 				ct := bfv.NewCiphertext(params, compressed.Deg, compressed.Lvl)
@@ -99,7 +99,7 @@ func DecompressCT(compressedCTs interface{}, sampler ringqp.UniformSampler, para
 	case [][]*PIRQueryItem:
 		decompressed := make([]interface{}, len(compressedCTs.([][]*PIRQueryItem)))
 		for i := range decompressed {
-			if compressedCTs.([][]*PIRQueryItem)[i][0].isPlain {
+			if compressedCTs.([][]*PIRQueryItem)[i][0].IsPlain {
 				decompressed[i] = compressedCTs.([][]*PIRQueryItem)[i][0].Idx
 			} else {
 				decompressed[i] = make([]*rlwe.Ciphertext, len(compressedCTs.([][]*PIRQueryItem)[i]))
@@ -115,7 +115,7 @@ func DecompressCT(compressedCTs interface{}, sampler ringqp.UniformSampler, para
 		}
 		return decompressed, nil
 	case *PIRQueryItem:
-		if compressedCTs.(*PIRQueryItem).isPlain {
+		if compressedCTs.(*PIRQueryItem).IsPlain {
 			return []interface{}{compressedCTs.(*PIRQueryItem).Idx}, nil
 		}
 		ct := bfv.NewCiphertext(params, compressedCTs.(*PIRQueryItem).Deg, params.MaxLevel())

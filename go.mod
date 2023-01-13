@@ -10,7 +10,9 @@ require (
 
 require (
 	git.sr.ht/~sbinet/gg v0.3.1 // indirect
+	github.com/DataDog/go-python3 v0.0.0-20211102160307-40adc605f1fe // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
+	github.com/christian-korneck/go-python3 v0.0.0-20200921060006-847aa92a90a5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-fonts/liberation v0.2.0 // indirect
 	github.com/go-latex/latex v0.0.0-20210823091927-c0d11ff05a81 // indirect

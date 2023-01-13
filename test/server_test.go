@@ -4,6 +4,7 @@ import (
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"pir"
+	Server "pir/server"
 	"pir/settings"
 	"pir/utils"
 	"testing"
@@ -31,7 +32,7 @@ func TestServerEncode(t *testing.T) {
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
 					params := settings.GetsParamForPIR(logN, dimentions, false, false, pir.NONELEAKAGE)
-					server := pir.NewPirServer()
+					server := Server.NewPirServer()
 					//let's verify that values are encoded as expected
 					ctx, err := settings.NewPirContext(item, size, 1<<params.LogN(), dimentions)
 					if err != nil {
@@ -43,12 +44,12 @@ func TestServerEncode(t *testing.T) {
 					} else {
 						ecdStorageAsMap := make(map[string][]rlwe.Operand)
 						ecdStore.Range(func(key, value any) bool {
-							ecdStorageAsMap[key.(string)], _ = value.(*pir.PIREntry).Encode(settings.TUsableBits, box.Ecd.ShallowCopy(), params)
+							ecdStorageAsMap[key.(string)], _ = value.(*Server.PIREntry).Encode(settings.TUsableBits, box.Ecd.ShallowCopy(), params)
 							return true
 						})
 						for k, v := range ecdStorageAsMap {
 							entryFromDb, _ := server.Store.Load(k)
-							expected := entryFromDb.(*pir.PIREntry).Coalesce()
+							expected := entryFromDb.(*Server.PIREntry).Coalesce()
 							actual := box.Ecd.DecodeUintNew(v[0].(*bfv.PlaintextMul))
 							for i := 1; i < len(v); i++ {
 								actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)
@@ -93,7 +94,7 @@ func TestServerEncodeWPIR(t *testing.T) {
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
 					params := settings.GetsParamForPIR(logN, dimentions, true, true, pir.HIGHLEAKAGE)
-					server := pir.NewPirServer()
+					server := Server.NewPirServer()
 					//let's verify that values are encoded as expected
 					ctx, err := settings.NewPirContext(item, size, 1<<params.LogN(), dimentions)
 					if err != nil {
@@ -105,12 +106,12 @@ func TestServerEncodeWPIR(t *testing.T) {
 					} else {
 						ecdStorageAsMap := make(map[string][]rlwe.Operand)
 						ecdStore.Range(func(key, value any) bool {
-							ecdStorageAsMap[key.(string)], _ = value.(*pir.PIREntry).Encode(settings.TUsableBits, box.Ecd, params)
+							ecdStorageAsMap[key.(string)], _ = value.(*Server.PIREntry).Encode(settings.TUsableBits, box.Ecd, params)
 							return true
 						})
 						for k, v := range ecdStorageAsMap {
 							entryFromDb, _ := server.Store.Load(k)
-							expected := entryFromDb.(*pir.PIREntry).Coalesce()
+							expected := entryFromDb.(*Server.PIREntry).Coalesce()
 							actual := box.Ecd.DecodeUintNew(v[0])
 							for i := 1; i < len(v); i++ {
 								actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)
