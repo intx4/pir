@@ -29,6 +29,7 @@ class iefDeassociationRecord():
 @dataclass
 class iefRecord():
     isAssoc: int = 1
+    error: bytes = "None".encode()
     assoc: iefAssociationRecord = None
     deassoc: iefDeassociationRecord = None
 
@@ -224,55 +225,58 @@ IEFMessage.componentType = namedtype.NamedTypes(
 )
 
 def decode(msg: bytes)->iefRecord:
-    print("\nStart parsing\n")
-    msg = base64.b64decode(msg)
-
-    message = decoder.decode(msg, asn1Spec=IEFMessage())[0]
-
-    record = message.getComponentByName("record")
-
-    if record is None:
-        raise Exception("ASN1 Decoding Error for IEFRecord")
     decoded_record = iefRecord()
-    decoded_record.assoc = None
-    decoded_record.deassoc = None
-    if record['deassociationRecord'].isValue:
-        decoded_record.deassoc = iefDeassociationRecord(
-            supi=record['deassociationRecord']['sUPI']['iMSI']._value.encode(),
-            fivegguti=record['deassociationRecord']['fiveGGUTI']._value,
-            ncgi={
-                'pLMNID':record['deassociationRecord']['nCGI']['pLMNID']._value,
-                'nCI':str(int(record['deassociationRecord']['nCGI']['nCI']._value)).encode(),
-            },
-            ncgi_time=record['deassociationRecord']['nCGITime']._value.encode(),
-            timestmp=record['deassociationRecord']['timestamp']._value.encode(),
-        )
-        print(decoded_record)
-        decoded_record.isAssoc = 0
-        return decoded_record
 
-    # need for God knows whatever reason, we need to reinstantiate record
+    try:
+        msg = base64.b64decode(msg)
 
-    message = decoder.decode(msg, asn1Spec=IEFMessage())[0]
+        message = decoder.decode(msg, asn1Spec=IEFMessage())[0]
 
-    record = message.getComponentByName("record")
-    if record['associationRecord'].isValue:
-        decoded_record.assoc = iefAssociationRecord(
-            supi=record['associationRecord']['sUPI']['iMSI']._value.encode(),
-            suci=record['associationRecord']['sUCI']._value,
-            fivegguti=record['associationRecord']['fiveGGUTI']._value,
-            ncgi={
-                'pLMNID':record['associationRecord']['nCGI']['pLMNID']._value,
-                  'nCI':str(int(record['associationRecord']['nCGI']['nCI']._value)).encode()
-            },
-            ncgi_time=record['associationRecord']['nCGITime']._value.encode(),
-            tai=record['associationRecord']['tAI']._value,
-            timestmp=record['associationRecord']['timestamp']._value.encode(),
-            list_of_tai=[str(tai).encode() for tai in record['associationRecord']['fiveGSTAIList']._componentValues.values()],
-            pei="",
-        )
-        print(decoded_record)
-        decoded_record.isAssoc = 1
+        record = message.getComponentByName("record")
+
+        if record is None:
+            raise Exception("ASN1 Decoding Error for IEFRecord")
+
+        if record['deassociationRecord'].isValue:
+            decoded_record.deassoc = iefDeassociationRecord(
+                supi=record['deassociationRecord']['sUPI']['iMSI']._value.encode(),
+                fivegguti=record['deassociationRecord']['fiveGGUTI']._value,
+                ncgi={
+                    'pLMNID':record['deassociationRecord']['nCGI']['pLMNID']._value,
+                    'nCI':str(int(record['deassociationRecord']['nCGI']['nCI']._value)).encode(),
+                },
+                ncgi_time=record['deassociationRecord']['nCGITime']._value.encode(),
+                timestmp=record['deassociationRecord']['timestamp']._value.encode(),
+            )
+            decoded_record.isAssoc = 0
+            return decoded_record
+
+        # needed for God knows whatever reason, we need to reinstantiate record
+
+        message = decoder.decode(msg, asn1Spec=IEFMessage())[0]
+        record = message.getComponentByName("record")
+        if record is None:
+            raise Exception("ASN1 Decoding Error for IEFRecord")
+
+        if record['associationRecord'].isValue:
+            decoded_record.assoc = iefAssociationRecord(
+                supi=record['associationRecord']['sUPI']['iMSI']._value.encode(),
+                suci=record['associationRecord']['sUCI']._value,
+                fivegguti=record['associationRecord']['fiveGGUTI']._value,
+                ncgi={
+                    'pLMNID':record['associationRecord']['nCGI']['pLMNID']._value,
+                      'nCI':str(int(record['associationRecord']['nCGI']['nCI']._value)).encode()
+                },
+                ncgi_time=record['associationRecord']['nCGITime']._value.encode(),
+                tai=record['associationRecord']['tAI']._value,
+                timestmp=record['associationRecord']['timestamp']._value.encode(),
+                list_of_tai=[str(tai).encode() for tai in record['associationRecord']['fiveGSTAIList']._componentValues.values()],
+                pei=record['associationRecord']['pEI']['iMEISV']._value,
+            )
+            decoded_record.isAssoc = 1
+            return decoded_record
+    except Exception as ex:
+        decoded_record.error = str(ex).encode()
         return decoded_record
 
 

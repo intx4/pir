@@ -40,7 +40,12 @@ func convertPyObjectToIEFRecord(pyObject *python3.PyObject) (*IEFRecord, error) 
 	var assoc *IEFAssociationRecord
 	var deassoc *IEFDeassociationRecord
 	var err error
-	isAssoc := python3.PyLong_AsLong(pyObject.GetAttrString("isAssoc")) //new
+	isAssoc := python3.PyLong_AsLong(pyObject.GetAttrString("isAssoc"))        //new
+	decodingError := python3.PyBytes_AsString(pyObject.GetAttrString("error")) //new
+	if decodingError != "None" {
+		fmt.Println("ERROR: ", decodingError)
+		return nil, errors.New(decodingError)
+	}
 	if isAssoc == 1 {
 		assocPyObject := pyObject.GetAttrString("assoc")
 		defer assocPyObject.DecRef()
@@ -194,7 +199,10 @@ func (xs *XerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer output.DecRef()
-		goOutput, _ := convertPyObjectToIEFRecord(output)
+		goOutput, err := convertPyObjectToIEFRecord(output)
+		if err != nil {
+			return
+		}
 		fmt.Fprintf(w, "200 Ok")
 		xs.recordChan <- goOutput
 	default:
