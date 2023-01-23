@@ -1,7 +1,7 @@
 syntax = "proto3";
 package client;
 
-option go_package= "github.com/intx4/pir/pb";
+option go_package= "github.com/intx4/pir/client";
 
 message InternalRequest {
   string query = 1;
