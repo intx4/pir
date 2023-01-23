@@ -98,7 +98,7 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 							t.Logf(err.Error())
 							continue
 						}
-						//now we create a new client instance
+						//now we create a new pb instance
 						client := Client.NewPirClient(params, "1")
 						//now we create a profile which contains all the params and keys needed to server
 						profile := client.GenProfile()

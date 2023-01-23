@@ -1,12 +1,18 @@
 package client
 
 import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
+	"google.golang.org/grpc"
+	"log"
 	"math"
 	"math/rand"
 	"pir"
+	pb "pir/client/pb"
 	"pir/settings"
 	"pir/utils"
 )
@@ -184,4 +190,37 @@ func (PC *PIRClient) wpQueryGen(key []byte, Kd, dimentions, dimToSkip int, box *
 		}
 	}
 	return query, nil
+}
+
+// Sends query to ICF via gRPC service in Python. Address is of form "ip:port"
+func (PC *PIRClient) SendQuery(query *pir.PIRQuery, address string) ([]*rlwe.Ciphertext, error) {
+	conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock())
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	defer conn.Close()
+
+	client := pb.NewInternalClientClient(conn)
+	data, err := json.Marshal(query)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	req := pb.InternalRequest{
+		Query: base64.StdEncoding.EncodeToString(data),
+	}
+	resp, err := client.Query(context.Background(), &req)
+	answerDec, err := base64.StdEncoding.DecodeString(resp.Answer)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	pirAnswer := &pir.PIRAnswer{}
+	err = json.Unmarshal(answerDec, pirAnswer)
+	if err != nil {
+		log.Println(err)
+		return nil, err
+	}
+	return pirAnswer.Answer, err
 }

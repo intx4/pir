@@ -21,7 +21,7 @@ func readBytesFromFile(filepath string) ([]byte, error) {
 // Wrapper for testing needed for cgo
 func testXER() {
 	recordChan := make(chan *IEFRecord)
-	server, err := NewXerServer("127.0.0.1", "6021", recordChan)
+	server, err := NewXerServer("172.17.0.1", "60021", recordChan)
 	if err != nil {
 		log.Fatal(err.Error())
 	}

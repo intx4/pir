@@ -353,7 +353,7 @@ func (PS *PIRServer) ObliviousExpand(query []interface{}, box *settings.HeBox, d
 }
 
 /*
-Given an encoded PIR database and a query from client, answers the query.
+Given an encoded PIR database and a query from pb, answers the query.
 The query can be represented as:
   - a series query vectors of ciphertexts. In each vector (we have d vectors for d dimentions), each ciphertext is Enc(0), but for one
     where ct is Enc(1). If this ct is the ct in position i-th, then you will retrieve all associated to index i for this dimention
@@ -363,7 +363,7 @@ The query can be represented as:
     After that, all these results get accumulated by summing the results.
     Returns a list of ciphertexts, i.e the answer, which is the result of the accumulation
     between all buckets in the server multiplied by the query. Ideally only one element in a certain bucket will survive
-    the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
+    the selection. The resulting bucket is returned to the pb which can decrypt the answer and retrieve the value
 */
 func (PS *PIRServer) AnswerGen(ecdStore Storage, box *settings.HeBox, query []interface{}, ctx *settings.PirContext) ([]*rlwe.Ciphertext, error) {
 	Kd, Dimentions := ctx.Kd, ctx.Dim
