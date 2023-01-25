@@ -18,22 +18,45 @@ import (
 )
 
 type PIRClient struct {
-	B  *settings.HeBox
-	Id string
+	context *settings.PirContext
+	B       map[string]*settings.HeBox
+	Pp      map[string]*settings.PIRProfile
+	Id      string
 }
 
-func NewPirClient(params bfv.Parameters, id string) *PIRClient {
+func NewPirClient(id string) *PIRClient {
 	client := new(PIRClient)
 	client.Id = id
-	client.B, _ = settings.NewHeBox(params)
-	client.B.GenSk()
+	client.Pp = map[string]*settings.PIRProfile{}
+	client.B = map[string]*settings.HeBox{}
 	return client
 }
 
-// Creates a new profile to be sent to server
-func (PC *PIRClient) GenProfile() *settings.PIRProfile {
-	pp := &settings.PIRProfile{ClientId: PC.Id, Rlk: PC.B.GenRelinKey(), Rtks: PC.B.GenRtksKeys()}
-	return pp
+func (PC *PIRClient) AddContext(context *settings.PirContext) {
+	PC.context = context
+}
+
+func (PC *PIRClient) GenProfile(expansion bool, weaklyPrivate bool, leakage int) (*settings.PIRProfile, error) {
+	if PC.context == nil {
+		return nil, errors.New("Need to initialize context")
+	}
+	var err error
+	paramsID, params := settings.GetsParamForPIR(int(math.Log2(float64(PC.context.N))), PC.context.Dim, expansion, weaklyPrivate, leakage)
+	if _, ok := PC.B[paramsID]; ok {
+		return PC.Pp[paramsID], nil
+	} else {
+		PC.B[paramsID], err = settings.NewHeBox(params)
+		if err != nil {
+			return nil, err
+		}
+		PC.B[paramsID].GenSk()
+		PC.Pp[paramsID] = &settings.PIRProfile{
+			Rlk:     PC.B[paramsID].GenRelinKey(),
+			Rtks:    PC.B[paramsID].GenRtksKeys(),
+			Context: *PC.context,
+		}
+		return PC.Pp[paramsID], nil
+	}
 }
 
 /*
@@ -43,24 +66,30 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) QueryGen(key []byte, ctx *settings.PirContext, leakage int, weaklyPrivate, compressed bool) (*pir.PIRQuery, float64, error) {
+func (PC *PIRClient) QueryGen(key []byte, leakage int, expansion bool, weaklyPrivate, compressed bool) (*pir.PIRQuery, float64, error) {
 	//new seeded prng
+	ctx := PC.context
 	seed := rand.Int63n(1<<63 - 1)
 	prng, err := pir.NewPRNG(seed)
 	if err != nil {
 		panic(err)
 	}
-	box := PC.B
-	box.WithEncryptor(bfv.NewPRNGEncryptor(box.Params, box.Sk).WithPRNG(prng))
+	paramsID, params := settings.GetsParamForPIR(int(math.Log2(float64(PC.context.N))), PC.context.Dim, expansion, weaklyPrivate, leakage)
+	box := PC.B[paramsID]
+	box.WithEncryptor(bfv.NewPRNGEncryptor(params, box.Sk).WithPRNG(prng))
 	q := new(pir.PIRQuery)
 	q.ClientId = PC.Id
 	q.Seed = seed
+	if PC.Pp == nil {
+		return nil, 0.0, errors.New("Need to generate profile before query")
+	}
+	q.Profile = PC.Pp[paramsID]
 	leakedBits := 0.0
 	if !weaklyPrivate {
 		if compressed {
 			q.Q, err = PC.compressedQueryGen(key, ctx.Kd, ctx.Dim, box)
 		} else {
-			q.Q, err = PC.queryGen(key, ctx, box)
+			q.Q, err = PC.queryGen(key, *ctx, box)
 		}
 	} else {
 		if compressed == false {
@@ -90,7 +119,7 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) queryGen(key []byte, ctx *settings.PirContext, box *settings.HeBox) ([][]*pir.PIRQueryItem, error) {
+func (PC *PIRClient) queryGen(key []byte, ctx settings.PirContext, box *settings.HeBox) ([][]*pir.PIRQueryItem, error) {
 	Kd, dimentions := ctx.Kd, ctx.Dim
 	if box.Ecd == nil || box.Enc == nil || box.Dec == nil {
 		return nil, errors.New("Client is not initialiazed with Encoder or Encryptor or Decryptor")
@@ -144,19 +173,22 @@ func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *set
 	return query, nil
 }
 
-func (PC *PIRClient) AnswerGet(answer []*rlwe.Ciphertext) ([]byte, error) {
-	box := PC.B
-	res := make([]byte, 0)
-	for _, a := range answer {
-		decrypted := box.Dec.DecryptNew(a)
-		decoded := box.Ecd.DecodeUintNew(decrypted)
-		value, err := utils.Unchunkify(decoded, settings.TUsableBits)
+func (PC *PIRClient) AnswerGet(paramsID string, answer []*rlwe.Ciphertext) ([]byte, error) {
+	if box, ok := PC.B[paramsID]; !ok {
+		return nil, errors.New("Params not found to decrypt answer")
+	} else {
+		res := make([]uint64, 0)
+		for _, a := range answer {
+			decrypted := box.Dec.DecryptNew(a)
+			decoded := box.Ecd.DecodeUintNew(decrypted)
+			res = append(res, decoded...)
+		}
+		value, err := utils.Unchunkify(res, settings.TUsableBits)
 		if err != nil {
 			return nil, err
 		}
-		res = append(res, value...)
+		return value, nil
 	}
-	return res, nil
 }
 
 // |
