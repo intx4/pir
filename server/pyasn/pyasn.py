@@ -20,6 +20,7 @@ class iefAssociationRecord():
 @dataclass
 class iefDeassociationRecord():
     supi: str
+    suci: str
     fivegguti: str
     timestmp: str
     ncgi: {}  # nCI -> v, pLMNID ->
@@ -45,7 +46,6 @@ from datetime import datetime
 
 def get_time_utc() -> str:
     return datetime.now().strftime('%Y-%m-%dT%H:%M:%S.%fZ')
-
 class EUI64(univ.OctetString):
     pass
 
@@ -184,7 +184,8 @@ IEFDeassociationRecord.componentType = namedtype.NamedTypes(
     namedtype.NamedType('fiveGGUTI', FiveGGUTI().subtype(implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 2))),
     namedtype.NamedType('timestamp', useful.GeneralizedTime().subtype(implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 3))),
     namedtype.NamedType('nCGI', NCGI().subtype(implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatConstructed, 4))),
-    namedtype.NamedType('nCGITime', useful.GeneralizedTime().subtype(implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 5)))
+    namedtype.NamedType('nCGITime', useful.GeneralizedTime().subtype(implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 5))),
+    namedtype.OptionalNamedType('sUCI', SUCI().subtype(implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatSimple, 6)))
 )
 
 
@@ -245,8 +246,9 @@ def decode(msg: bytes)->iefRecord:
                     'pLMNID':record['deassociationRecord']['nCGI']['pLMNID']._value,
                     'nCI':str(int(record['deassociationRecord']['nCGI']['nCI']._value)).encode(),
                 },
-                ncgi_time=record['deassociationRecord']['nCGITime']._value.encode(),
-                timestmp=record['deassociationRecord']['timestamp']._value.encode(),
+                ncgi_time=record['deassociationRecord']['nCGITime']._value[:-8].encode(),
+                timestmp=record['deassociationRecord']['timestamp']._value[:-8].encode(),
+                suci=record['deassociationRecord']['sUCI']._value,
             )
             decoded_record.isAssoc = 0
             return decoded_record
@@ -267,11 +269,11 @@ def decode(msg: bytes)->iefRecord:
                     'pLMNID':record['associationRecord']['nCGI']['pLMNID']._value,
                       'nCI':str(int(record['associationRecord']['nCGI']['nCI']._value)).encode()
                 },
-                ncgi_time=record['associationRecord']['nCGITime']._value.encode(),
+                ncgi_time=record['associationRecord']['nCGITime']._value[:-8].encode(),
                 tai=record['associationRecord']['tAI']._value,
-                timestmp=record['associationRecord']['timestamp']._value.encode(),
+                timestmp=record['associationRecord']['timestamp']._value[:-8].encode(),
                 list_of_tai=[str(tai).encode() for tai in record['associationRecord']['fiveGSTAIList']._componentValues.values()],
-                pei=record['associationRecord']['pEI']['iMEISV']._value,
+                pei=record['associationRecord']['pEI']['iMEISV']._value.encode(),
             )
             decoded_record.isAssoc = 1
             return decoded_record
@@ -281,5 +283,6 @@ def decode(msg: bytes)->iefRecord:
 
 
 if __name__ == "__main__":
-    print(decode(b'MIGbBgkEARQCEAMCBAGigY2hgYqhC4EJMTIzNDU2Nzg5ggowMTAyMDMwNDA1gxsyMDIzLTAxLTEzVDExOjM1OjI3LjQ0MTUzOVqEBjAxMDEwMaUNgQM5OTmCBgQAAAABAIYbMjAyMy0wMS0xM1QxMTozNToyNy40NDE1OTlahwxBQUFBQUFBQUFBQUGpEAQGMDEwMTAxBAYxMDEwMTA='
+    print(decode(b'MIGvBgkEARQCEAMCBAGigaGhgZ6hC4EJMTIzNDU2Nzg5ggowMTAyMDMwNDA1gxsyMDIzLTAxLTI1VDEwOjQyOjM2LjUwOTM3M1qEBjAxMDEwMaUNgQM5OTmCBgQAAAABAIYbMjAyMy0wMS0yNVQxMDo0MjozNi41MDkzOTJahwxBQUFBQUFBQUFBQUGoEoIQNDM3MDgxNjEyNTgxNjE1MakQBAYwMTAxMDEEBjEwMTAxMA==='))
+    print(decode(b'MH8GCQQBFAIQAwIEAaJyonChC4EJMTIzNDU2Nzg5ggowMTAyMDMwNDA1gxsyMDIzLTAxLTI1VDEwOjI1OjMwLjA2MzkwNVqkDYEDOTk5ggYEAAAAAQCFGzIwMjMtMDEtMjVUMTA6MjU6MzAuMDYzOTMxWoYMQUFBQUFBQUFBQUFB='
                  ))

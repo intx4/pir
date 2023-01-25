@@ -29,6 +29,7 @@ type IEFAssociationRecord struct {
 
 type IEFDeassociationRecord struct {
 	Supi      string            `json:"supi,omitempty"`
+	Suci      string            `json:"suci,omitempty"`
 	FiveGGUTI string            `json:"fivegguti,omitempty"`
 	Timestmp  string            `json:"timestmp,omitempty"`
 	Ncgi      map[string]string `json:"ncgi,omitempty"`
@@ -107,7 +108,7 @@ func convertPyObjectToIEFDeassociationRecord(pyObject *python3.PyObject) (*IEFDe
 	iefDeassociationRecord.Supi = python3.PyBytes_AsString(pyObject.GetAttrString("supi"))
 	iefDeassociationRecord.FiveGGUTI = python3.PyBytes_AsString(pyObject.GetAttrString("fivegguti"))
 	iefDeassociationRecord.Timestmp = python3.PyBytes_AsString(pyObject.GetAttrString("timestmp"))
-
+	iefDeassociationRecord.Suci = python3.PyBytes_AsString(pyObject.GetAttrString("suci"))
 	ncgiPyObject := pyObject.GetAttrString("ncgi")
 	ncgi := make(map[string]string)
 	ncgi["pLMNID"] = python3.PyBytes_AsString(python3.PyDict_GetItemString(ncgiPyObject, "pLMNID"))
