@@ -98,7 +98,7 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					//create a server
 					server := Server.NewPirServerBenchmark()
 					//now we create a new pir instance
-					client := Client.NewPirClient("1")
+					client := Client.NewPirClient("1", "", nil, nil)
 					//now we create a profile which contains all the params and keys needed to server
 					client.AddContext(ctx)
 					client.GenProfile(params.ParametersLiteral())

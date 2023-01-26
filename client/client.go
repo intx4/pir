@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"github.com/sirupsen/logrus"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"google.golang.org/grpc"
@@ -17,27 +18,87 @@ import (
 	"pir/utils"
 )
 
-type PIRClient struct {
-	context *settings.PirContext
-	B       map[string]*settings.HeBox
-	Pp      map[string]*settings.PIRProfile
-	Id      string
+type PIRRequest struct {
+	Key           []byte
+	Expansion     bool
+	WeaklyPrivate bool
+	Leakage       int
 }
 
-func NewPirClient(id string) *PIRClient {
+type PIRClient struct {
+	Context      *settings.PirContext
+	B            map[string]*settings.HeBox
+	Pp           map[string]*settings.PIRProfile
+	Id           string
+	RequestChan  chan *PIRRequest
+	ResponseChan chan []byte
+	IqfAddr      string
+}
+
+func NewPirClient(id string, iqfAddr string, requestChan chan *PIRRequest, responseChan chan []byte) *PIRClient {
 	client := new(PIRClient)
 	client.Id = id
 	client.Pp = map[string]*settings.PIRProfile{}
 	client.B = map[string]*settings.HeBox{}
+	client.RequestChan = requestChan
+	client.ResponseChan = responseChan
+	client.IqfAddr = iqfAddr
 	return client
 }
 
-func (PC *PIRClient) AddContext(context *settings.PirContext) {
-	PC.context = context
+// Starts client: first it fetches the context
+func (PC *PIRClient) Start() {
+	request := PC.ContextReqGen()
+	leakedBits := 0.0
+	for true {
+		answer, err := PC.SendQuery(request, PC.IqfAddr)
+		if err != nil {
+			if PC.Context == nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Could not fetch context")
+				panic("Could not fetch context")
+			}
+			utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
+			go func(err error) { PC.ResponseChan <- []byte(err.Error()) }(err)
+			continue
+		}
+		payload, prof, err := PC.ParseAnswer(answer)
+		if err != nil {
+			if PC.Context == nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Could not fetch context")
+				panic("Could not fetch context")
+			} else {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
+				go func(err error) { PC.ResponseChan <- []byte(err.Error()) }(err)
+				continue
+			}
+		} else {
+			if prof != nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "profile": prof, "context": PC.Context}).Info("Fetched context and set profile")
+			}
+			if payload != "" {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "payload": payload, "leak": leakedBits}).Info("Answer")
+			}
+			//wait for requests from frontend
+			err = errors.New("Invalid request")
+			for err != nil {
+				command := <-PC.RequestChan
+				request, leakedBits, err = PC.QueryGen(command.Key, PC.B[settings.ParamsToString(answer.Params)].Params.ParametersLiteral(), command.Leakage, command.Expansion, command.WeaklyPrivate, true)
+				if err != nil {
+					utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error generating query")
+					go func(err error) { PC.ResponseChan <- []byte(err.Error()) }(err)
+				}
+			}
+		}
+	}
 }
 
+func (PC *PIRClient) AddContext(context *settings.PirContext) {
+	PC.Context = context
+}
+
+// Generate profile given a set of parameters and stores it, if not already present. Context must be previously set
 func (PC *PIRClient) GenProfile(literal bfv.ParametersLiteral) (*settings.PIRProfile, error) {
-	if PC.context == nil {
+	if PC.Context == nil {
 		return nil, errors.New("Need to initialize context")
 	}
 	var err error
@@ -56,7 +117,7 @@ func (PC *PIRClient) GenProfile(literal bfv.ParametersLiteral) (*settings.PIRPro
 		PC.Pp[settings.ParamsToString(literal)] = &settings.PIRProfile{
 			Rlk:     PC.B[settings.ParamsToString(literal)].GenRelinKey(),
 			Rtks:    PC.B[settings.ParamsToString(literal)].GenRtksKeys(),
-			Context: *PC.context,
+			Context: *PC.Context,
 		}
 		return PC.Pp[settings.ParamsToString(literal)], nil
 	}
@@ -83,7 +144,7 @@ Inside on of the sublists, you have a list of ciphers when only one is enc(1) to
 */
 func (PC *PIRClient) QueryGen(key []byte, params bfv.ParametersLiteral, leakage int, expansion bool, weaklyPrivate, compressed bool) (*pir.PIRQuery, float64, error) {
 	//new seeded prng
-	ctx := PC.context
+	ctx := PC.Context
 	seed := rand.Int63n(1<<63 - 1)
 	prng, err := pir.NewPRNG(seed)
 	if err != nil {
@@ -188,6 +249,7 @@ func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *set
 }
 
 // Returns string from DB if any, profile if generated after a fetch request, and error
+// It also automatically updates context with the one sent by server and generates a new profile accordingly if needed
 func (PC *PIRClient) ParseAnswer(answer *pir.PIRAnswer) (string, *settings.PIRProfile, error) {
 	if answer.Ok {
 		if answer.Answer == nil {

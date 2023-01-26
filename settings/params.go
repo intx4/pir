@@ -103,7 +103,7 @@ var PARAMS = map[string]bfv.ParametersLiteral{
 	"12|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
 	"13|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}},
 	"13|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{60, 60}},
-	"14|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 45, 45}, LogP: []int{60, 60, 60, 60}},
+	"14|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 45, 45}, LogP: []int{60, 60, 60, 60}}, //not working?
 	"14|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60, 60, 60, 60}},
 }
 

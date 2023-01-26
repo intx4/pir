@@ -9,6 +9,7 @@ import (
 	"github.com/tuneinsight/lattigo/v4/rlwe/ringqp"
 	utils2 "github.com/tuneinsight/lattigo/v4/utils"
 	"math/rand"
+	"pir/settings"
 )
 
 const (
@@ -47,9 +48,12 @@ type PIRQueryItem struct {
 }
 
 type PIRQuery struct {
-	Q        interface{} `json:"q,omitempty"`
-	Seed     int64       `json:"seed,omitempty"`
-	ClientId string      `json:"id,omitempty"`
+	Q            interface{}          `json:"q,omitempty"`
+	Seed         int64                `json:"seed,omitempty"`
+	ClientId     string               `json:"id,omitempty"`
+	Profile      *settings.PIRProfile `json:"profile, omitempty"`
+	ByGUTI       bool                 `json:"byGUTI, omitempty"`
+	FetchContext bool                 `json:"fetchContext, omitempty"`
 }
 
 func (PQ *PIRQueryItem) MarshalBinary() ([]byte, error) {
