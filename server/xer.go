@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/christian-korneck/go-python3"
+	"github.com/sirupsen/logrus"
 	"log"
 	"net/http"
+	"pir/utils"
 )
 
 type IEFRecord struct {
@@ -44,6 +46,7 @@ func convertPyObjectToIEFRecord(pyObject *python3.PyObject) (*IEFRecord, error) 
 	isAssoc := python3.PyLong_AsLong(pyObject.GetAttrString("isAssoc"))        //new
 	decodingError := python3.PyBytes_AsString(pyObject.GetAttrString("error")) //new
 	if decodingError != "None" {
+		utils.Logger.WithFields(logrus.Fields{"service": "XER", "error": decodingError}).Error("Error")
 		fmt.Println("ERROR: ", decodingError)
 		return nil, errors.New(decodingError)
 	}
@@ -58,6 +61,7 @@ func convertPyObjectToIEFRecord(pyObject *python3.PyObject) (*IEFRecord, error) 
 				return nil, err
 			}
 		}
+		utils.Logger.WithFields(logrus.Fields{"service": "XER", "association": assoc}).Info("IEFRecord:")
 		iefRecord.Assoc = assoc
 	} else if isAssoc == 0 {
 		deassocPyObject := pyObject.GetAttrString("deassoc")
@@ -70,6 +74,7 @@ func convertPyObjectToIEFRecord(pyObject *python3.PyObject) (*IEFRecord, error) 
 				return nil, err
 			}
 		}
+		utils.Logger.WithFields(logrus.Fields{"service": "XER", "association": deassoc}).Info("IEFRecord:")
 		iefRecord.DeAssoc = deassoc
 	}
 	return iefRecord, nil
@@ -91,7 +96,7 @@ func convertPyObjectToIEFAssociationRecord(pyObject *python3.PyObject) (*IEFAsso
 
 	iefAssociationRecord.NcgiTime = python3.PyBytes_AsString(pyObject.GetAttrString("ncgi_time"))
 	iefAssociationRecord.Suci = python3.PyBytes_AsString(pyObject.GetAttrString("suci"))
-	//iefAssociationRecord.Pei = python3.PyBytes_AsString(pyObject.GetAttrString("pei"))
+	iefAssociationRecord.Pei = python3.PyBytes_AsString(pyObject.GetAttrString("pei"))
 	listOfTaiPyObject := pyObject.GetAttrString("list_of_tai")
 	listOfTai := make([]string, 0)
 	for i := 0; i < python3.PyList_Size(listOfTaiPyObject); i++ {
@@ -178,11 +183,13 @@ func (xs *XerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body.Read(buff)
 		inputBuf := bytes.NewBuffer(buff)
 		log.Println(inputBuf.String())
+		utils.Logger.WithFields(logrus.Fields{"service": "XER", "body": inputBuf.String()}).Info("POST request")
 		inputPyBytes := python3.PyBytes_FromString(inputBuf.String()) //new Ref
 		args := python3.PyTuple_New(1)                                //retval: New reference
 		if args == nil {
 			inputPyBytes.DecRef()
 			fmt.Errorf("error creating args tuple")
+			utils.Logger.WithFields(logrus.Fields{"service": "XER", "error": "error creating pyTuple for pyasn.decode call"}).Error("Error")
 			return
 		}
 		defer args.DecRef()
@@ -190,6 +197,7 @@ func (xs *XerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if ret != 0 {
 			if python3.PyErr_Occurred() != nil {
 				python3.PyErr_Print()
+				utils.Logger.WithFields(logrus.Fields{"service": "XER", "error": "error setting pyTuple for pyasn.decode call"}).Error("Error")
 			}
 			return
 		}
@@ -197,6 +205,7 @@ func (xs *XerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if !(output != nil && python3.PyErr_Occurred() == nil) {
 			python3.PyErr_Print()
 			fmt.Printf("error calling function")
+			utils.Logger.WithFields(logrus.Fields{"service": "XER", "error": "error during pyasn.decode call"}).Error("Error")
 			return
 		}
 		defer output.DecRef()
@@ -205,8 +214,10 @@ func (xs *XerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		fmt.Fprintf(w, "200 Ok")
+		utils.Logger.WithFields(logrus.Fields{"service": "XER"}).Error("Sending POST response 200 OK")
 		xs.recordChan <- goOutput
 	default:
+		utils.Logger.WithFields(logrus.Fields{"service": "XER", "error": "HTTP method not supported"}).Error("Error")
 		fmt.Fprintf(w, "405 - only POST methods are supported.")
 	}
 }

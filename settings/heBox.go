@@ -31,12 +31,12 @@ func (B *HeBox) WithKeys(sk *rlwe.SecretKey, pk *rlwe.PublicKey) {
 
 func (B *HeBox) WithKey(sk *rlwe.SecretKey) {
 	B.Sk = sk
-	B.WithDecryptor(rlwe.NewDecryptor(B.Params.Parameters, sk))
 }
 
 func (B *HeBox) GenSk() *rlwe.SecretKey {
 	sk := B.Kgen.GenSecretKey()
 	B.WithKey(sk)
+	B.WithDecryptor(rlwe.NewDecryptor(B.Params.Parameters, sk))
 	return B.Sk
 }
 

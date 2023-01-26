@@ -71,12 +71,13 @@ poly_modulus_degree             | max coeff_modulus bit-length
 1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
 */
 // Key = logN|Dimentions|{1|0}(1 if Expansion else 0)|{1|0}(1 if WPIR else 0)|{0|1|2}(0 if no WPIR, 1 if WPIR with STD leakage, 2 if WPIR with high leakage)
+var DEFAULTPARAMS bfv.ParametersLiteral = bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}}
 var PARAMS = map[string]bfv.ParametersLiteral{
 	"13|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}}, //no expansion
 	"14|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
-	"13|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}},
+	"13|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}},
 	"14|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
-	"13|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}}, //expansion
+	"13|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}}, //expansion
 	"14|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
 	"13|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}},
 	"14|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
@@ -106,7 +107,7 @@ var PARAMS = map[string]bfv.ParametersLiteral{
 	"14|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60, 60, 60, 60}},
 }
 
-func GetsParamForPIR(logN, dimentions int, expansion, weaklyPrivate bool, leakage int) bfv.Parameters {
+func GetsParamForPIR(logN, dimentions int, expansion, weaklyPrivate bool, leakage int) (string, bfv.Parameters) {
 	E := "0"
 	if expansion {
 		E = "1"
@@ -123,6 +124,10 @@ func GetsParamForPIR(logN, dimentions int, expansion, weaklyPrivate bool, leakag
 		if err != nil {
 			panic(err.Error())
 		}
-		return params
+		return k, params
 	}
+}
+
+func ParamsToString(literal bfv.ParametersLiteral) string {
+	return fmt.Sprintf("LogN%dT%dLogQ%dLogP%d", literal.LogN, literal.T, literal.LogQ, literal.LogP)
 }

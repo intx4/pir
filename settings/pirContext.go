@@ -19,6 +19,8 @@ type PirContext struct {
 	Dim        int `json:"Dim,omitempty"`
 	ExpBinSize int `json:"ExpBinSize,omitempty"`
 	MaxBinSize int `json:"MaxBinSize,omitempty"`
+	Items      int `json:"Items"`
+	N          int `json:"N,omitempty"`
 }
 
 // used for estimating bin size from https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
@@ -40,7 +42,7 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 
 // Takes as input number of items in DB, bit size of items, and params
 func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, error) {
-	ctx := &PirContext{MaxBinSize: int(math.Floor((float64(TUsableBits*N) - math.Log2(float64(TUsableBits*N)) - float64(3*TUsableBits)) / float64(Size+8)))} //- for padding and length, +8 is 1 byte for separator "|"
+	ctx := &PirContext{Items: Items, MaxBinSize: int(math.Floor((float64(TUsableBits*N) - math.Log2(float64(TUsableBits*N)) - float64(3*TUsableBits)) / float64(Size+8))), N: N} //- for padding and length, +8 is 1 byte for separator "|"
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := math.E
 	exp := 2.0

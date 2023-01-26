@@ -36,26 +36,41 @@ func (PC *PIRClient) AddContext(context *settings.PirContext) {
 	PC.context = context
 }
 
-func (PC *PIRClient) GenProfile(expansion bool, weaklyPrivate bool, leakage int) (*settings.PIRProfile, error) {
+func (PC *PIRClient) GenProfile(literal bfv.ParametersLiteral) (*settings.PIRProfile, error) {
 	if PC.context == nil {
 		return nil, errors.New("Need to initialize context")
 	}
 	var err error
-	paramsID, params := settings.GetsParamForPIR(int(math.Log2(float64(PC.context.N))), PC.context.Dim, expansion, weaklyPrivate, leakage)
-	if _, ok := PC.B[paramsID]; ok {
-		return PC.Pp[paramsID], nil
+	params, err := bfv.NewParametersFromLiteral(literal)
+	if err != nil {
+		return nil, err
+	}
+	if _, ok := PC.B[settings.ParamsToString(literal)]; ok {
+		return PC.Pp[settings.ParamsToString(literal)], nil
 	} else {
-		PC.B[paramsID], err = settings.NewHeBox(params)
+		PC.B[settings.ParamsToString(literal)], err = settings.NewHeBox(params)
 		if err != nil {
 			return nil, err
 		}
-		PC.B[paramsID].GenSk()
-		PC.Pp[paramsID] = &settings.PIRProfile{
-			Rlk:     PC.B[paramsID].GenRelinKey(),
-			Rtks:    PC.B[paramsID].GenRtksKeys(),
+		PC.B[settings.ParamsToString(literal)].GenSk()
+		PC.Pp[settings.ParamsToString(literal)] = &settings.PIRProfile{
+			Rlk:     PC.B[settings.ParamsToString(literal)].GenRelinKey(),
+			Rtks:    PC.B[settings.ParamsToString(literal)].GenRtksKeys(),
 			Context: *PC.context,
 		}
-		return PC.Pp[paramsID], nil
+		return PC.Pp[settings.ParamsToString(literal)], nil
+	}
+}
+
+// generates query to download context and params
+func (PC *PIRClient) ContextReqGen() *pir.PIRQuery {
+	return &pir.PIRQuery{
+		Q:            nil,
+		Seed:         0,
+		ClientId:     PC.Id,
+		Profile:      nil,
+		ByGUTI:       false,
+		FetchContext: true,
 	}
 }
 
@@ -66,7 +81,7 @@ key: key of the element (e.g a subset of the data items, like some keywords)
 Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
 Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
 */
-func (PC *PIRClient) QueryGen(key []byte, leakage int, expansion bool, weaklyPrivate, compressed bool) (*pir.PIRQuery, float64, error) {
+func (PC *PIRClient) QueryGen(key []byte, params bfv.ParametersLiteral, leakage int, expansion bool, weaklyPrivate, compressed bool) (*pir.PIRQuery, float64, error) {
 	//new seeded prng
 	ctx := PC.context
 	seed := rand.Int63n(1<<63 - 1)
@@ -74,16 +89,15 @@ func (PC *PIRClient) QueryGen(key []byte, leakage int, expansion bool, weaklyPri
 	if err != nil {
 		panic(err)
 	}
-	paramsID, params := settings.GetsParamForPIR(int(math.Log2(float64(PC.context.N))), PC.context.Dim, expansion, weaklyPrivate, leakage)
-	box := PC.B[paramsID]
-	box.WithEncryptor(bfv.NewPRNGEncryptor(params, box.Sk).WithPRNG(prng))
+	box := PC.B[settings.ParamsToString(params)]
+	box.WithEncryptor(bfv.NewPRNGEncryptor(box.Params, box.Sk).WithPRNG(prng))
 	q := new(pir.PIRQuery)
 	q.ClientId = PC.Id
 	q.Seed = seed
 	if PC.Pp == nil {
 		return nil, 0.0, errors.New("Need to generate profile before query")
 	}
-	q.Profile = PC.Pp[paramsID]
+	q.Profile = PC.Pp[settings.ParamsToString(params)]
 	leakedBits := 0.0
 	if !weaklyPrivate {
 		if compressed {
@@ -173,8 +187,31 @@ func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *set
 	return query, nil
 }
 
-func (PC *PIRClient) AnswerGet(paramsID string, answer []*rlwe.Ciphertext) ([]byte, error) {
-	if box, ok := PC.B[paramsID]; !ok {
+// Returns string from DB if any, profile if generated after a fetch request, and error
+func (PC *PIRClient) ParseAnswer(answer *pir.PIRAnswer) (string, *settings.PIRProfile, error) {
+	if answer.Ok {
+		if answer.Answer == nil {
+			PC.AddContext(answer.Context)
+			prof, err := PC.GenProfile(answer.Params)
+			if err != nil {
+				return "", nil, err
+			}
+			return "", prof, nil
+		} else {
+			data, err := PC.AnswerGet(answer.Params, answer.Answer)
+			if err != nil {
+				return "", nil, err
+			} else {
+				return string(data), nil, nil
+			}
+		}
+	} else {
+		return "", nil, errors.New(answer.Error)
+	}
+}
+
+func (PC *PIRClient) AnswerGet(params bfv.ParametersLiteral, answer []*rlwe.Ciphertext) ([]byte, error) {
+	if box, ok := PC.B[settings.ParamsToString(params)]; !ok {
 		return nil, errors.New("Params not found to decrypt answer")
 	} else {
 		res := make([]uint64, 0)
@@ -224,8 +261,12 @@ func (PC *PIRClient) wpQueryGen(key []byte, Kd, dimentions, dimToSkip int, box *
 	return query, nil
 }
 
+// GRPC
+// |
+// v
+
 // Sends query to ICF via gRPC service in Python. Address is of form "ip:port"
-func (PC *PIRClient) SendQuery(query *pir.PIRQuery, address string) ([]*rlwe.Ciphertext, error) {
+func (PC *PIRClient) SendQuery(query *pir.PIRQuery, address string) (*pir.PIRAnswer, error) {
 	conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		log.Println(err)
@@ -254,5 +295,5 @@ func (PC *PIRClient) SendQuery(query *pir.PIRQuery, address string) ([]*rlwe.Cip
 		log.Println(err)
 		return nil, err
 	}
-	return pirAnswer.Answer, err
+	return pirAnswer, err
 }
