@@ -1,6 +1,5 @@
 import base64
 from dataclasses import dataclass
-
 from pyasn1 import debug, codec, error
 
 
@@ -224,6 +223,17 @@ IEFMessage.componentType = namedtype.NamedTypes(
     namedtype.NamedType('iEFRecordOID', oid),
     namedtype.NamedType('record', IEFRecord().subtype(implicitTag=tag.Tag(tag.tagClassContext, tag.tagFormatConstructed, 2)))
 )
+def _format_suci(suci)->str:
+    """ Format suci to follow what UERANSIM captures"""
+    if type(suci) == bytes:
+        suci = suci.decode()
+    return suci.split("-")[-1]
+
+def _format_guti(guti)->str:
+    """ Format guti to follow what UERANSIM captures"""
+    if type(guti) == bytes:
+        guti = guti.decode()
+    return guti
 
 def decode(msg: bytes)->iefRecord:
     decoded_record = iefRecord()
@@ -241,14 +251,14 @@ def decode(msg: bytes)->iefRecord:
         if record['deassociationRecord'].isValue:
             decoded_record.deassoc = iefDeassociationRecord(
                 supi=record['deassociationRecord']['sUPI']['iMSI']._value.encode(),
-                fivegguti=record['deassociationRecord']['fiveGGUTI']._value,
+                fivegguti=_format_guti(record['deassociationRecord']['fiveGGUTI']._value).encode(),
                 ncgi={
                     'pLMNID':record['deassociationRecord']['nCGI']['pLMNID']._value,
                     'nCI':str(int(record['deassociationRecord']['nCGI']['nCI']._value)).encode(),
                 },
                 ncgi_time=record['deassociationRecord']['nCGITime']._value[:-8].encode(),
                 timestmp=record['deassociationRecord']['timestamp']._value[:-8].encode(),
-                suci=record['deassociationRecord']['sUCI']._value,
+                suci=_format_suci(record['deassociationRecord']['sUCI']._value).encode(),
             )
             decoded_record.isAssoc = 0
             return decoded_record
@@ -263,8 +273,8 @@ def decode(msg: bytes)->iefRecord:
         if record['associationRecord'].isValue:
             decoded_record.assoc = iefAssociationRecord(
                 supi=record['associationRecord']['sUPI']['iMSI']._value.encode(),
-                suci=record['associationRecord']['sUCI']._value,
-                fivegguti=record['associationRecord']['fiveGGUTI']._value,
+                suci=_format_suci(record['associationRecord']['sUCI']._value).encode(),
+                fivegguti=_format_guti(record['associationRecord']['fiveGGUTI']._value).encode(),
                 ncgi={
                     'pLMNID':record['associationRecord']['nCGI']['pLMNID']._value,
                       'nCI':str(int(record['associationRecord']['nCGI']['nCI']._value)).encode()
@@ -278,6 +288,7 @@ def decode(msg: bytes)->iefRecord:
             decoded_record.isAssoc = 1
             return decoded_record
     except Exception as ex:
+        decoded_record.isAssoc = -1
         decoded_record.error = str(ex).encode()
         return decoded_record
 

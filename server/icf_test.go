@@ -9,6 +9,8 @@ var LOCAL = true
 func test_XER(t *testing.T, addr string, port string) {
 	testXER(addr, port)
 }
+
+// Test reception of records and decoding using pyasn module
 func TestXer(t *testing.T) {
 	testCases := []struct {
 		name string

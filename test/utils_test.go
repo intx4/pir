@@ -2,11 +2,28 @@ package test
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/tuneinsight/lattigo/v4/bfv"
-	"pir/settings"
 	"pir/utils"
 	"testing"
 )
+
+/*
+poly_modulus_degree             | max coeff_modulus bit-length
+1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
+*/
+var QI = map[int]map[int][]int{
+	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
+	2: {
+		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
+		8192:  []int{35, 60},
+		16384: []int{35, 60},
+	},
+	3: {
+		8192:  []int{35, 60},
+		16384: []int{35, 60},
+	},
+}
 
 func TestPadding(t *testing.T) {
 	lens := []int{50, 76, 100, 250, 395, 471}
@@ -76,8 +93,8 @@ func TestEncodeChunks(t *testing.T) {
 
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
 		LogN: 12,
-		LogQ: settings.QI[2][8192], //this is actually QP from the RNS BFV paper
-		T:    uint64(65537),        //Fermat prime
+		LogQ: QI[2][8192],   //this is actually QP from the RNS BFV paper
+		T:    uint64(65537), //Fermat prime
 	})
 	if err != nil {
 		t.Fatalf(err.Error())
@@ -103,4 +120,10 @@ func TestEncodeChunks(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestGenKeysAtDepth(t *testing.T) {
+	keys := make([]string, 0)
+	utils.GenKeysAtDepth("1|1", 2, 4, 4, &keys)
+	fmt.Println(keys)
 }

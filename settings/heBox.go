@@ -33,6 +33,7 @@ func (B *HeBox) WithKey(sk *rlwe.SecretKey) {
 	B.Sk = sk
 }
 
+// Generates and set Sk as well as decryptor
 func (B *HeBox) GenSk() *rlwe.SecretKey {
 	sk := B.Kgen.GenSecretKey()
 	B.WithKey(sk)

@@ -13,65 +13,9 @@ var TUsableBits = 16
 poly_modulus_degree             | max coeff_modulus bit-length
 1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
 */
-var QI = map[int]map[int][]int{
-	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
-	2: {
-		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
-		8192:  []int{35, 60},
-		16384: []int{35, 60},
-	},
-	3: {
-		8192:  []int{35, 60},
-		16384: []int{35, 60},
-	},
-}
+var DEFAULTPARAMS bfv.ParametersLiteral = bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60, 60}, LogP: []int{32, 31}}
 
-/*
-poly_modulus_degree             | max coeff_modulus bit-length
-1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
-*/
-var QIforExp = map[int]map[int][]int{
-	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
-	2: {
-		//4096:  []int{35, 60}, -> not supported with expansion, too much noise
-		8192:  []int{35, 45, 45, 45},
-		16384: []int{35, 45, 45, 45},
-	},
-	3: {
-		8192:  []int{35, 60, 60},
-		16384: []int{35, 60, 60},
-	},
-}
-
-/*
-poly_modulus_degree             | max coeff_modulus bit-length
-1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
-*/
-var QIforWP = map[int]map[int][]int{
-	//last in chain needs to be > log(2t) bits (we will have t of noise, so noise budget must be [log(q)-log(t)] - log(t) > 0
-	2: {
-		4096:  []int{35, 45, 45, 45},
-		8192:  []int{35, 45, 45, 45},
-		16384: []int{35, 45, 45, 45},
-	},
-	3: {
-		4096:  []int{35, 45, 45, 45},
-		8192:  []int{35, 45, 45, 45},
-		16384: []int{35, 45, 45, 45},
-	},
-	4: {
-		4096:  []int{35, 45, 45, 45},
-		8192:  []int{35, 45, 45, 45},
-		16384: []int{35, 45, 45, 45},
-	},
-}
-
-/*
-poly_modulus_degree             | max coeff_modulus bit-length
-1024 2048 4096 8192 16384 32768 | 27 54 109 218 438 881
-*/
 // Key = logN|Dimentions|{1|0}(1 if Expansion else 0)|{1|0}(1 if WPIR else 0)|{0|1|2}(0 if no WPIR, 1 if WPIR with STD leakage, 2 if WPIR with high leakage)
-var DEFAULTPARAMS bfv.ParametersLiteral = bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}}
 var PARAMS = map[string]bfv.ParametersLiteral{
 	"13|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}}, //no expansion
 	"14|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
@@ -79,8 +23,8 @@ var PARAMS = map[string]bfv.ParametersLiteral{
 	"14|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
 	"13|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}}, //expansion
 	"14|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
-	"13|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}},
-	"14|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60, 60, 60, 60}},
+	"13|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60, 60}, LogP: []int{32, 31}},
+	"14|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 50, 50}, LogP: []int{50, 50, 50}},
 	"12|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, //WPIR - d 2 (always 1 mul)
 	"12|2|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
 	"13|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
@@ -103,7 +47,7 @@ var PARAMS = map[string]bfv.ParametersLiteral{
 	"12|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
 	"13|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}},
 	"13|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{60, 60}},
-	"14|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 45, 45}, LogP: []int{60, 60, 60, 60}}, //not working?
+	"14|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 45, 45}, LogP: []int{60, 60, 60, 60}}, //not working
 	"14|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60, 60, 60, 60}},
 }
 

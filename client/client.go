@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -12,121 +13,185 @@ import (
 	"log"
 	"math"
 	"math/rand"
-	"pir"
 	pb "pir/client/pb"
+	"pir/messages"
+	"pir/server"
 	"pir/settings"
 	"pir/utils"
+	"strconv"
+	"time"
 )
 
-type PIRRequest struct {
+type InternalRequest struct {
+	// Sent from backend to pir logic
 	Key           []byte
 	Expansion     bool
 	WeaklyPrivate bool
 	Leakage       int
 }
 
+type InternalResponse struct {
+	// From client to backend
+	Payload []*server.ICFRecord `json:"payload,omitempty"`
+	Leakage float64             `json:"leakage"`
+	Latency float64             `json:"latency"`
+	Error   error               `json:"error,omitempty"`
+}
+type RequestChannel chan *InternalRequest
+type ResponseChannel chan *InternalResponse
+
 type PIRClient struct {
+	//Defines the client for the PIR protocol
 	Context      *settings.PirContext
-	B            map[string]*settings.HeBox
-	Pp           map[string]*settings.PIRProfile
+	Pp           map[string]*settings.PIRProfileSet
 	Id           string
-	RequestChan  chan *PIRRequest
-	ResponseChan chan []byte
-	IqfAddr      string
+	RequestChan  RequestChannel
+	ResponseChan ResponseChannel
+	GrpcAddrPort string
 }
 
-func NewPirClient(id string, iqfAddr string, requestChan chan *PIRRequest, responseChan chan []byte) *PIRClient {
+// Returns a new PIR Client. Must provide unique id (used at server-side for storing crypto material),
+// grpc address and port of the proxy to forward requests to IQF
+// and channels for internal communication with backend
+func NewPirClient(id string, grpcAddrPort string, requestChan RequestChannel, responseChan ResponseChannel) *PIRClient {
 	client := new(PIRClient)
 	client.Id = id
-	client.Pp = map[string]*settings.PIRProfile{}
-	client.B = map[string]*settings.HeBox{}
+	client.Pp = make(map[string]*settings.PIRProfileSet)
 	client.RequestChan = requestChan
 	client.ResponseChan = responseChan
-	client.IqfAddr = iqfAddr
+	client.GrpcAddrPort = grpcAddrPort
 	return client
 }
 
-// Starts client: first it fetches the context
+// Starts client: first it fetches the context, then listen for new queries (blocking)
 func (PC *PIRClient) Start() {
-	request := PC.ContextReqGen()
-	leakedBits := 0.0
+	utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Fetching context")
+	PC.RequireContext()
+	utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Context fetched")
+	PC.ListenForQueries()
+}
+
+// Listen for queries from backend
+func (PC *PIRClient) ListenForQueries() {
+	utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Listening for queries...")
 	for true {
-		answer, err := PC.SendQuery(request, PC.IqfAddr)
-		if err != nil {
-			if PC.Context == nil {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Could not fetch context")
-				panic("Could not fetch context")
-			}
-			utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
-			go func(err error) { PC.ResponseChan <- []byte(err.Error()) }(err)
+		command := <-PC.RequestChan
+		if profile, ok := PC.Pp[PC.Context.Hash()].P[command.Leakage]; !ok {
+			go func() {
+				PC.ResponseChan <- &InternalResponse{Error: errors.New("Profile not found for leakage setting")}
+			}()
 			continue
-		}
-		payload, prof, err := PC.ParseAnswer(answer)
-		if err != nil {
-			if PC.Context == nil {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Could not fetch context")
-				panic("Could not fetch context")
-			} else {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
-				go func(err error) { PC.ResponseChan <- []byte(err.Error()) }(err)
+		} else {
+			start := time.Now()
+			request, leakedBits, err := PC.QueryGen(command.Key, profile, command.Leakage, command.WeaklyPrivate, command.Expansion, true)
+			if err != nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error generating query")
+				go func(err error) {
+					PC.ResponseChan <- &InternalResponse{Error: err}
+				}(err)
 				continue
 			}
-		} else {
-			if prof != nil {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "profile": prof, "context": PC.Context}).Info("Fetched context and set profile")
+			answer, err := PC.SendQuery(request, PC.GrpcAddrPort)
+			if err != nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
+				go func(err error) {
+					PC.ResponseChan <- &InternalResponse{Error: err}
+				}(err)
+				continue
 			}
-			if payload != "" {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "payload": payload, "leak": leakedBits}).Info("Answer")
-			}
-			//wait for requests from frontend
-			err = errors.New("Invalid request")
-			for err != nil {
-				command := <-PC.RequestChan
-				request, leakedBits, err = PC.QueryGen(command.Key, PC.B[settings.ParamsToString(answer.Params)].Params.ParametersLiteral(), command.Leakage, command.Expansion, command.WeaklyPrivate, true)
-				if err != nil {
-					utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error generating query")
-					go func(err error) { PC.ResponseChan <- []byte(err.Error()) }(err)
+			payload, err := PC.ParseAnswer(answer, profile)
+			if err != nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
+				go func(err error) {
+					PC.ResponseChan <- &InternalResponse{Error: err}
+				}(err)
+				continue
+			} else {
+				if payload != nil {
+					records, err := PC.decodeICFRecords(payload)
+					if err != nil {
+						utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error decoding ICF records")
+						go func(err error) {
+							PC.ResponseChan <- &InternalResponse{Error: err}
+						}(err)
+						continue
+					} else {
+						utils.Logger.WithFields(logrus.Fields{"service": "client", "payload": string(payload), "leak": leakedBits}).Info("Answer")
+						end := time.Since(start).Seconds()
+						go func(records []*server.ICFRecord, leakedBits float64, end float64) {
+							PC.ResponseChan <- &InternalResponse{Payload: records, Leakage: leakedBits, Latency: end}
+						}(records, leakedBits/float64(PC.Context.Items), end)
+						continue
+					}
 				}
 			}
 		}
 	}
 }
 
+// Sets new context
 func (PC *PIRClient) AddContext(context *settings.PirContext) {
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "context": context}).Info("Updating context")
 	PC.Context = context
 }
 
 // Generate profile given a set of parameters and stores it, if not already present. Context must be previously set
-func (PC *PIRClient) GenProfile(literal bfv.ParametersLiteral) (*settings.PIRProfile, error) {
-	if PC.Context == nil {
-		return nil, errors.New("Need to initialize context")
-	}
-	var err error
-	params, err := bfv.NewParametersFromLiteral(literal)
+func (PC *PIRClient) GenProfile(params bfv.Parameters, paramsId string) (*settings.PIRProfile, error) {
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "paramsId": params}).Info("Generating profile")
+	box, err := settings.NewHeBox(params)
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := PC.B[settings.ParamsToString(literal)]; ok {
-		return PC.Pp[settings.ParamsToString(literal)], nil
-	} else {
-		PC.B[settings.ParamsToString(literal)], err = settings.NewHeBox(params)
-		if err != nil {
-			return nil, err
-		}
-		PC.B[settings.ParamsToString(literal)].GenSk()
-		PC.Pp[settings.ParamsToString(literal)] = &settings.PIRProfile{
-			Rlk:     PC.B[settings.ParamsToString(literal)].GenRelinKey(),
-			Rtks:    PC.B[settings.ParamsToString(literal)].GenRtksKeys(),
-			Context: *PC.Context,
-		}
-		return PC.Pp[settings.ParamsToString(literal)], nil
+	box.GenSk()
+	profile := &settings.PIRProfile{
+		Rlk:           box.GenRelinKey(),
+		Rtks:          box.GenRtksKeys(),
+		ParamsId:      paramsId,
+		ContextHash:   PC.Context.Hash(),
+		Box:           box,
+		KnownByServer: false,
 	}
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "paramsId": params}).Info("Generated profile")
+	return profile, nil
 }
 
-// generates query to download context and params
-func (PC *PIRClient) ContextReqGen() *pir.PIRQuery {
-	return &pir.PIRQuery{
+// Generates a set of profile for the various leakages according to current context,
+// Context must be previously set
+func (PC *PIRClient) GenProfileSet() error {
+	if PC.Context == nil {
+		return errors.New("Need to initialize context")
+	}
+	ctx := PC.Context
+	utils.Logger.WithFields(logrus.Fields{"service": "client"}).Info("Generating profile set")
+	for contexts, _ := range PC.Pp {
+		if contexts == ctx.Hash() {
+			//profiles for context already created
+			utils.Logger.WithFields(logrus.Fields{"service": "client"}).Warn("Profiles for context already stored")
+			return nil
+		}
+	}
+	logN := int(math.Log2(float64(ctx.N)))
+	profiles := make(map[int]*settings.PIRProfile)
+	var err error
+	for _, leakage := range []int{messages.NONELEAKAGE, messages.STANDARDLEAKAGE, messages.HIGHLEAKAGE} {
+		paramsId, params := settings.GetsParamForPIR(logN, server.DEFAULTDIMS, true, leakage != messages.NONELEAKAGE, leakage)
+		profiles[leakage], err = PC.GenProfile(params, paramsId)
+		if err != nil {
+			return err
+		}
+	}
+	PC.Pp[ctx.Hash()] = &settings.PIRProfileSet{
+		P: profiles,
+	}
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "contextHash": ctx.Hash()}).Info("Generated profile set")
+	return nil
+}
+
+// generates query to download context
+func (PC *PIRClient) ContextReqGen() *messages.PIRQuery {
+	return &messages.PIRQuery{
 		Q:            nil,
+		Leakage:      0,
 		Seed:         0,
 		ClientId:     PC.Id,
 		Profile:      nil,
@@ -135,74 +200,89 @@ func (PC *PIRClient) ContextReqGen() *pir.PIRQuery {
 	}
 }
 
+// Fetches context from ISP and sets it along new profiles
+func (PC *PIRClient) RequireContext() {
+	request := PC.ContextReqGen()
+	answer, err := PC.SendQuery(request, PC.GrpcAddrPort)
+	if err != nil {
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error fetching context")
+		panic("Error fetching context: " + err.Error())
+	}
+	_, err = PC.ParseAnswer(answer, nil)
+	if err != nil {
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error fetching context")
+		PC.ResponseChan <- &InternalResponse{Error: err}
+	}
+	PC.ResponseChan <- &InternalResponse{}
+}
+
 /*
-Given a key, generates a query as a list of list ciphertexts to retrieve the element associated to the key
-It assumes that both the querier and the server agree on the same context (i.e crypto params for BFV and key space)
-key: key of the element (e.g a subset of the data items, like some keywords)
-Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
-Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
+Given a key, generates a WPIR query
+It assumes that both the querier and the server agree on the same context (i.e logN and logT params for BFV and hypercube dimentions)
+key: key of the element (e.g a subset of the data items, e.g some keywords)
+Set dinamically the level of information leakage from 0 (none) to 2 (max).
+Currently only queries with expansion set to true and compressed set to true are supported:
+This will represent the query with one ciphertext per hypercube dimention (which will be then obliviously expanded at the server)
+and each ciphertext will be compressed in one polynomial instead of two
 */
-func (PC *PIRClient) QueryGen(key []byte, params bfv.ParametersLiteral, leakage int, expansion bool, weaklyPrivate, compressed bool) (*pir.PIRQuery, float64, error) {
+func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage int, weaklyPrivate, expansion, compressed bool) (*messages.PIRQuery, float64, error) {
 	//new seeded prng
 	ctx := PC.Context
 	seed := rand.Int63n(1<<63 - 1)
-	prng, err := pir.NewPRNG(seed)
+	prng, err := messages.NewPRNG(seed)
 	if err != nil {
 		panic(err)
 	}
-	box := PC.B[settings.ParamsToString(params)]
+	box := profile.Box
 	box.WithEncryptor(bfv.NewPRNGEncryptor(box.Params, box.Sk).WithPRNG(prng))
-	q := new(pir.PIRQuery)
+	q := new(messages.PIRQuery)
+	q.Leakage = leakage
 	q.ClientId = PC.Id
 	q.Seed = seed
-	if PC.Pp == nil {
-		return nil, 0.0, errors.New("Need to generate profile before query")
-	}
-	q.Profile = PC.Pp[settings.ParamsToString(params)]
+	q.Profile = profile
+	q.Q = new(messages.PIRQueryItemContainer)
 	leakedBits := 0.0
 	if !weaklyPrivate {
 		if compressed {
-			q.Q, err = PC.compressedQueryGen(key, ctx.Kd, ctx.Dim, box)
+			q.Q.Compressed, err = PC.compressedQueryGen(key, ctx.Kd, ctx.Dim, box)
 		} else {
-			q.Q, err = PC.queryGen(key, *ctx, box)
+			q.Q.Expanded, err = PC.queryGen(key, *ctx, box)
 		}
 	} else {
 		if compressed == false {
 			return nil, 0, errors.New("WPIR queries are not supported without compression")
 		}
-		if leakage == pir.NONELEAKAGE {
+		if leakage == messages.NONELEAKAGE {
 			return nil, 0, errors.New("NONE leakage is supported only if not weakly private query")
 		}
 		s := 1.0
-		if leakage == pir.STANDARDLEAKAGE {
+		if leakage == messages.STANDARDLEAKAGE {
 			s = math.Floor(float64(ctx.Dim) / 2)
 		}
-		if leakage == pir.HIGHLEAKAGE {
+		if leakage == messages.HIGHLEAKAGE {
 			s = float64(ctx.Dim - 1)
 		}
 
 		leakedBits = (s / float64(ctx.Dim)) * math.Log2(float64(ctx.K))
-		q.Q, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, int(s), box)
+		q.Q.Compressed, q.Prefix, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, int(s), box)
 	}
+	keyInDb, _ := utils.MapKeyToDim(key, PC.Context.Kd, PC.Context.Dim)
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "key": string(key), "DB pos": keyInDb, "leak": leakage}).Info("Generated Query")
 	return q, leakedBits, err
 }
 
 /*
-Given a key, generates a query as a list of list ciphertexts to retrieve the element associated to the key
-It assumes that both the querier and the server agree on the same context (i.e crypto params for BFV and key space)
-key: key of the element (e.g a subset of the data items, like some keywords)
-Returns a list of list of Ciphertexts. Each list is needed to query one of the dimentions of the DB seen as an hypercube.
-Inside on of the sublists, you have a list of ciphers when only one is enc(1) to select the index of this dimention, until the last dimention when a plaintext value will be selected
+Generates no leakage query with no expansion required (high network cost)
 */
-func (PC *PIRClient) queryGen(key []byte, ctx settings.PirContext, box *settings.HeBox) ([][]*pir.PIRQueryItem, error) {
+func (PC *PIRClient) queryGen(key []byte, ctx settings.PirContext, box *settings.HeBox) ([][]*messages.PIRQueryItem, error) {
 	Kd, dimentions := ctx.Kd, ctx.Dim
 	if box.Ecd == nil || box.Enc == nil || box.Dec == nil {
 		return nil, errors.New("Client is not initialiazed with Encoder or Encryptor or Decryptor")
 	}
 	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
-	query := make([][]*pir.PIRQueryItem, dimentions)
+	query := make([][]*messages.PIRQueryItem, dimentions)
 	for i, k := range keys {
-		queryOfDim := make([]*pir.PIRQueryItem, Kd)
+		queryOfDim := make([]*messages.PIRQueryItem, Kd)
 		for d := 0; d < Kd; d++ {
 			c := &rlwe.Ciphertext{}
 			if d == k {
@@ -216,14 +296,17 @@ func (PC *PIRClient) queryGen(key []byte, ctx settings.PirContext, box *settings
 				//enc 0
 				c = box.Enc.EncryptZeroNew(box.Params.MaxLevel())
 			}
-			queryOfDim[d] = pir.CompressCT(c)
+			queryOfDim[d] = messages.CompressCT(c)
 		}
 		query[i] = queryOfDim
 	}
 	return query, nil
 }
 
-func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *settings.HeBox) ([]*pir.PIRQueryItem, error) {
+/*
+Generates a compressed no leakage query (low network cost, expansion at server needed)
+*/
+func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *settings.HeBox) ([]*messages.PIRQueryItem, error) {
 	if box.Ecd == nil || box.Enc == nil {
 		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
@@ -237,66 +320,27 @@ func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *set
 		selectors[i][k] = 1
 	}
 
-	query := make([]*pir.PIRQueryItem, dimentions)
+	query := make([]*messages.PIRQueryItem, dimentions)
 	enc := box.Enc
 	ecd := box.Ecd
 
 	for i := range query {
 		ct := enc.EncryptNew(utils.EncodeCoeffs(ecd, box.Params, selectors[i]))
-		query[i] = pir.CompressCT(ct)
+		query[i] = messages.CompressCT(ct)
 	}
 	return query, nil
-}
-
-// Returns string from DB if any, profile if generated after a fetch request, and error
-// It also automatically updates context with the one sent by server and generates a new profile accordingly if needed
-func (PC *PIRClient) ParseAnswer(answer *pir.PIRAnswer) (string, *settings.PIRProfile, error) {
-	if answer.Ok {
-		if answer.Answer == nil {
-			PC.AddContext(answer.Context)
-			prof, err := PC.GenProfile(answer.Params)
-			if err != nil {
-				return "", nil, err
-			}
-			return "", prof, nil
-		} else {
-			data, err := PC.AnswerGet(answer.Params, answer.Answer)
-			if err != nil {
-				return "", nil, err
-			} else {
-				return string(data), nil, nil
-			}
-		}
-	} else {
-		return "", nil, errors.New(answer.Error)
-	}
-}
-
-func (PC *PIRClient) AnswerGet(params bfv.ParametersLiteral, answer []*rlwe.Ciphertext) ([]byte, error) {
-	if box, ok := PC.B[settings.ParamsToString(params)]; !ok {
-		return nil, errors.New("Params not found to decrypt answer")
-	} else {
-		res := make([]uint64, 0)
-		for _, a := range answer {
-			decrypted := box.Dec.DecryptNew(a)
-			decoded := box.Ecd.DecodeUintNew(decrypted)
-			res = append(res, decoded...)
-		}
-		value, err := utils.Unchunkify(res, settings.TUsableBits)
-		if err != nil {
-			return nil, err
-		}
-		return value, nil
-	}
 }
 
 // |
 // | W PIR
 // v
 
-func (PC *PIRClient) wpQueryGen(key []byte, Kd, dimentions, dimToSkip int, box *settings.HeBox) ([]*pir.PIRQueryItem, error) {
+/*
+Generates a variable leakage query (expansion needed at server, low network cost)
+*/
+func (PC *PIRClient) wpQueryGen(key []byte, Kd, dimentions, dimToSkip int, box *settings.HeBox) ([]*messages.PIRQueryItem, string, error) {
 	if box.Ecd == nil || box.Enc == nil {
-		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
+		return nil, "", errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
 	//l := int(math.Ceil(float64(PC.Context.K) / float64(box.Params.N())))
 	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
@@ -308,54 +352,132 @@ func (PC *PIRClient) wpQueryGen(key []byte, Kd, dimentions, dimToSkip int, box *
 		selectors[i][k] = 1
 	}
 
-	query := make([]*pir.PIRQueryItem, dimentions)
+	query := make([]*messages.PIRQueryItem, dimentions-dimToSkip)
 	enc := box.Enc
 	ecd := box.Ecd
 
+	prefix := ""
+	for i := 0; i < dimToSkip; i++ {
+		prefix += strconv.FormatInt(int64(keys[i]), 10) + "|"
+	}
+	prefix = prefix[:len(prefix)-1] //remove final |
+
 	for i := range query {
-		if i < dimToSkip {
-			query[i] = &pir.PIRQueryItem{IsPlain: true, Idx: keys[i]}
-		} else {
-			ct := enc.EncryptNew(utils.EncodeCoeffs(ecd, box.Params, selectors[i-dimToSkip]))
-			query[i] = pir.CompressCT(ct)
+		ct := enc.EncryptNew(utils.EncodeCoeffs(ecd, box.Params, selectors[i]))
+		query[i] = messages.CompressCT(ct)
+	}
+
+	return query, prefix, nil
+}
+
+// Returns payload from DB if any,
+// and error.
+// It also automatically updates context with the one sent by server
+// and generates a new profile set accordingly if needed
+func (PC *PIRClient) ParseAnswer(answer *messages.PIRAnswer, profile *settings.PIRProfile) ([]byte, error) {
+	PC.AddContext(answer.Context)
+	err := PC.GenProfileSet()
+	if answer.Ok {
+		if answer.FetchContext {
+			utils.Logger.WithFields(logrus.Fields{"service": "client", "answer": "fetch-context"}).Info("Parsing answer")
+			return nil, err
+		} else if answer.Answer != nil {
+			utils.Logger.WithFields(logrus.Fields{"service": "client", "answer": "encrypted answer"}).Info("Parsing answer")
+			data, err := PC.AnswerGet(profile, answer.Answer)
+			if err != nil {
+				return nil, err
+			} else {
+				utils.Logger.WithFields(logrus.Fields{"service": "client", "answer": string(data)}).Info("Parsed answer")
+				return data, nil
+			}
+		}
+	} else {
+		utils.Logger.WithFields(logrus.Fields{"service": "client", "answer-error": answer.Error}).Info("Parsed answer with Error")
+		return nil, errors.New(answer.Error)
+	}
+	return nil, errors.New("Could not parse Answer")
+}
+
+// Given an encrypted answers, decrypts and parses it into bytes
+func (PC *PIRClient) AnswerGet(profile *settings.PIRProfile, answer []*rlwe.Ciphertext) ([]byte, error) {
+	//update profile
+	profile.KnownByServer = true
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "profile": profile, "paramsId": profile.ParamsId, "contextHash": profile.ContextHash}).Info("Decrypting answer")
+	box := profile.Box
+	res := make([]uint64, 0)
+	for _, a := range answer {
+		decrypted := box.Dec.DecryptNew(a)
+		decoded := box.Ecd.DecodeUintNew(decrypted)
+		res = append(res, decoded...)
+	}
+	value, err := utils.Unchunkify(res, settings.TUsableBits)
+	if err != nil {
+		return nil, err
+	}
+	return value, nil
+}
+
+// Decodes bytes into a series of ICFRecords
+func (PC *PIRClient) decodeICFRecords(payload []byte) ([]*server.ICFRecord, error) {
+	items := bytes.Split(payload, server.ITEMSEPARATOR)
+	records := make([]*server.ICFRecord, len(items))
+	for i := range items {
+		records[i] = new(server.ICFRecord)
+		err := records[i].SuccinctDecode(items[i])
+		if err != nil {
+			return nil, err
 		}
 	}
-	return query, nil
+	return records, nil
 }
 
 // GRPC
 // |
 // v
 
-// Sends query to ICF via gRPC service in Python. Address is of form "ip:port"
-func (PC *PIRClient) SendQuery(query *pir.PIRQuery, address string) (*pir.PIRAnswer, error) {
-	conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock())
+// Sends query to ICF via gRPC service in Python. Address is of form "ip:port"-
+// Returns a PIRAnswer to parse and any gRPC or parsing error
+func (PC *PIRClient) SendQuery(query *messages.PIRQuery, address string) (*messages.PIRAnswer, error) {
+	conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(200*1024*1024), grpc.MaxCallSendMsgSize(200*1024*1024)))
 	if err != nil {
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Connection error")
 		log.Println(err)
 		return nil, err
 	}
 	defer conn.Close()
 
-	client := pb.NewInternalClientClient(conn)
+	client := pb.NewProxyClient(conn)
 	data, err := json.Marshal(query)
 	if err != nil {
-		log.Println(err)
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Json Encode Error")
 		return nil, err
 	}
-	req := pb.InternalRequest{
+	req := pb.QueryMessage{
 		Query: base64.StdEncoding.EncodeToString(data),
 	}
+	utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "addr": address, "data": base64.StdEncoding.EncodeToString(data)[:int(utils.Min(float64(utils.MAXLEN), float64(len(base64.StdEncoding.EncodeToString(data)))))]}).Debug("Sending GRPC Query")
 	resp, err := client.Query(context.Background(), &req)
-	answerDec, err := base64.StdEncoding.DecodeString(resp.Answer)
 	if err != nil {
-		log.Println(err)
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error")
 		return nil, err
 	}
-	pirAnswer := &pir.PIRAnswer{}
-	err = json.Unmarshal(answerDec, pirAnswer)
-	if err != nil {
-		log.Println(err)
-		return nil, err
+	utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "response": logrus.Fields{"answer": resp.GetAnswer()[:int(utils.Min(float64(utils.MAXLEN), float64(len(resp.GetAnswer()))))], "error": resp.GetError()}}).Info("Received GRPC Response")
+	if resp.GetError() == "" {
+		answerDec, err := base64.StdEncoding.DecodeString(resp.GetAnswer())
+		if err != nil {
+			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("B64 decode Error")
+			return nil, err
+		}
+		pirAnswer := &messages.PIRAnswer{}
+		err = json.Unmarshal(answerDec, pirAnswer)
+		if err != nil {
+			log.Println(err)
+			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Json Decode Error")
+			return nil, err
+		}
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "ok": pirAnswer.Ok, "error": pirAnswer.Error, "fetch-context": pirAnswer.FetchContext}).Info("Answer")
+		return pirAnswer, err
+	} else {
+		return nil, errors.New("gRPC Answer Message: error= " + resp.GetError())
 	}
-	return pirAnswer, err
 }

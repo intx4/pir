@@ -9,21 +9,62 @@ import (
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 	"log"
 	"math"
-	"pir"
+	"pir/messages"
 	"pir/settings"
 	"pir/utils"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
 var DEFAULTSIZE = 300 * 8
-var DEFAULTSTARTITEMS = 1 << 16
+var DEFAULTSTARTITEMS = 1 << 8 //256
 var DEFAULTDIMS = 3
 var DEFAULTN = 1 << 13
 
-// this interface represents one element contained in the PIREntry
+var ITEMSEPARATOR = []byte("|")
+
+// Interface for an abstract storage
+type Storage interface {
+	Load(key interface{}) (interface{}, bool)
+}
+
+// Entry of PIRStorage struct
+// Leverages concurrent access of sync.Map while deferring atomicity to internal lock
+// Used during computation
+type PIREntry struct {
+	Mux *sync.RWMutex
+	Ops []rlwe.Operand
+}
+
+func NewPirEntry() *PIREntry {
+	return &PIREntry{
+		Mux: new(sync.RWMutex),
+		Ops: make([]rlwe.Operand, 0),
+	}
+}
+
+// PIRStorage is used during computation.
+// Supports concurrent lookups while atomicity is defered to single entry level
+// PIRStorage and PIREntry are in contrast with PIRDBStorage and PIRDBEntry which are instead used only for storing
+type PIRStorage struct {
+	Map *sync.Map `json:"map,omitempty"` //string -> PIREntry
+}
+
+func NewPirStorage() *PIRStorage {
+	storage := new(PIRStorage)
+	storage.Map = new(sync.Map)
+	return storage
+}
+
+func (S *PIRStorage) Load(key interface{}) (interface{}, bool) {
+	v, ok := S.Map.Load(key.(string))
+	return v, ok
+}
+
+// This interface represents one element contained in the PIRDBEntry (e.g an ICFRecord)
 type pirDBItem interface {
 	SuccinctEncode() []byte
 	SuccinctDecode([]byte) error
@@ -76,10 +117,11 @@ func (PE *PIRDBEntry) Sweap() int {
 	defer PE.Mux.Unlock()
 	removed := 0
 	newValue := make([]pirDBItem, 0)
-	for _, v := range PE.Value {
+	for i, v := range PE.Value {
 		if !v.IsExpired() {
 			newValue = append(newValue, v)
 		} else {
+			utils.Logger.WithFields(logrus.Fields{"service": "cache", "index": i}).Info("Removed element")
 			removed++
 		}
 	}
@@ -88,7 +130,7 @@ func (PE *PIRDBEntry) Sweap() int {
 	return removed
 }
 
-func (PE *PIRDBEntry) Coalesce() []byte {
+func (PE *PIRDBEntry) coalesce() []byte {
 	v := make([]byte, 0)
 	i := 0
 	for iv, val := range PE.Value {
@@ -98,8 +140,8 @@ func (PE *PIRDBEntry) Coalesce() []byte {
 			i++
 		}
 		if iv != len(PE.Value)-1 {
-			v[i] = []byte("|")[0]
-			i++
+			v = append(v, ITEMSEPARATOR...)
+			i += len(ITEMSEPARATOR)
 		}
 	}
 	return v
@@ -107,7 +149,9 @@ func (PE *PIRDBEntry) Coalesce() []byte {
 
 // Encodes entry as an array of RLWE ptx
 func (PE *PIRDBEntry) EncodeRLWE(t int, ecd bfv.Encoder, params bfv.Parameters) ([]rlwe.Operand, error) {
-	chunks, err := utils.Chunkify(PE.Coalesce(), t)
+	PE.Mux.Lock()
+	defer PE.Mux.Unlock()
+	chunks, err := utils.Chunkify(PE.coalesce(), t)
 	if err != nil {
 		return nil, err
 	}
@@ -119,22 +163,13 @@ func (PE *PIRDBEntry) EncodeRLWE(t int, ecd bfv.Encoder, params bfv.Parameters) 
 	return ecdChunks, nil
 }
 
-// Interface for an abstract storage type, either PIRStorage (map with global lock) or sync.Map
-type Storage interface {
-	Load(key interface{}) (interface{}, bool)
-}
-
-//type PIRStorage struct {
-//	Mux sync.RWMutex
-//	Map map[string][]rlwe.Operand `json:"map,omitempty"`
-//}
-
+// Main DB Struct for storing data and caching
 type PIRDBStorage struct {
-	Mux           *sync.RWMutex //global lock: the phylosophy is to allow selectively global atomic operations and concurrent access to the map
-	Db            *sync.Map     //string -> pirdbentry
+	Mux           *sync.RWMutex //global lock: the philosophy is to allow selectively global atomic operations and concurrent access to the map
+	Db            *sync.Map     //string -> PIRDBEntry
 	Context       *settings.PirContext
-	EncodedBySUCI bool //GUTI or SUCI
-	Items         int
+	EncodedBySUCI bool //GUTI false or SUCI true
+	Items         int  //actual number of items
 }
 
 func NewPirDBStorage(encodedBySUCI bool) (*PIRDBStorage, error) {
@@ -192,31 +227,7 @@ func (S *PIRDBStorage) encode() {
 	S.Db = ecdStorage
 }
 
-type PIREntry struct {
-	Mux *sync.RWMutex
-	Ops []rlwe.Operand
-}
-
-func NewPirEntry() *PIREntry {
-	return &PIREntry{
-		Mux: new(sync.RWMutex),
-		Ops: make([]rlwe.Operand, 0),
-	}
-}
-
-// PIRStorage is used during computation.
-// Supports concurrent lockups while atomicity is defered to single entry level
-type PIRStorage struct {
-	Map *sync.Map `json:"map,omitempty"` //string -> PIREntry
-}
-
-func NewPirStorage() *PIRStorage {
-	storage := new(PIRStorage)
-	storage.Map = new(sync.Map)
-	return storage
-}
-
-// Deprecated
+// Deprecated, you should instead use the encode method of each entry
 func (S *PIRDBStorage) EncodeRLWE(params bfv.Parameters) *PIRStorage {
 	S.Mux.Unlock()
 	defer S.Mux.Unlock()
@@ -255,17 +266,12 @@ func (S *PIRDBStorage) EncodeRLWE(params bfv.Parameters) *PIRStorage {
 	return &PIRStorage{Map: ecdStorage}
 }
 
-func (S *PIRStorage) Load(key interface{}) (interface{}, bool) {
-	v, ok := S.Load(key.(string))
-	return v, ok
-}
-
 func (S *PIRDBStorage) Add(event *IEFRecord) {
 	S.Mux.Lock() //needed to avoid insert during re-encoding
 	defer S.Mux.Unlock()
 	key, _ := "", []int{}
+	suci, guti := "", ""
 	if S.EncodedBySUCI {
-		suci := ""
 		if event.Assoc != nil {
 			suci = event.Assoc.Suci
 		} else if event.DeAssoc != nil {
@@ -274,7 +280,6 @@ func (S *PIRDBStorage) Add(event *IEFRecord) {
 		key, _ = utils.MapKeyToDim([]byte(suci), S.Context.Kd, S.Context.Dim)
 	} else {
 		//GUTI
-		guti := ""
 		if event.Assoc != nil {
 			guti = event.Assoc.FiveGGUTI
 		} else if event.DeAssoc != nil {
@@ -283,31 +288,37 @@ func (S *PIRDBStorage) Add(event *IEFRecord) {
 		key, _ = utils.MapKeyToDim([]byte(guti), S.Context.Kd, S.Context.Dim)
 	}
 	if v, loaded := S.Db.Load(key); !loaded { //no nead for LoadOrStore as cache insertion is atomic
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "key": key}).Info("Registering event in new entry in DB")
+		if S.EncodedBySUCI {
+			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": key}).Info("Registering event in new entry in DB")
+		} else {
+			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": key}).Info("Registering event in new entry in DB")
+		}
 		v = NewPirDBEntry()
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 		S.Db.Store(key, v)
 	} else {
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "key": key}).Info("Adding event to entry in DB")
+		if S.EncodedBySUCI {
+			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": key}).Info("Adding event in entry in DB")
+		} else {
+			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": key}).Info("Adding event in entry in DB")
+		}
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 	}
 	S.checkContext()
 }
 
 type PIRServer struct {
-	Profiles   map[string]*settings.PIRProfile
+	Profiles   map[string]map[string]*settings.PIRProfileSet //ctxHash -> client id -> profiles
 	Storage    *PIRDBStorage
 	RecordChan chan *IEFRecord
-	Params     bfv.Parameters
 }
 
-func NewPirServer(recordChan chan *IEFRecord, params bfv.Parameters) (*PIRServer, error) {
+func NewPirServer(recordChan chan *IEFRecord) (*PIRServer, error) {
 	PS := new(PIRServer)
 	var err error
 	PS.Storage, err = NewPirDBStorage(true)
-	PS.Profiles = make(map[string]*settings.PIRProfile)
+	PS.Profiles = make(map[string]map[string]*settings.PIRProfileSet)
 	PS.RecordChan = recordChan
-	PS.Params = params
 	return PS, err
 }
 
@@ -319,7 +330,7 @@ func (PS *PIRServer) cache() {
 	}()
 	for true {
 		event := <-PS.RecordChan
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "event": event}).Info("Caching event")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR"}).Info("Caching new event")
 		PS.Storage.Add(event)
 	}
 }
@@ -334,7 +345,7 @@ func (S *PIRDBStorage) checkContext() {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Info("Error while enlarging DB")
 			panic(err)
 		}
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "context": S.Context}).Info("Changing to bigger DB representation")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to bigger DB representation")
 		S.encode()
 	} else if S.Items >= 3*S.Items {
 		S.Context, err = settings.NewPirContext(S.Items*2, DEFAULTSIZE, DEFAULTN, DEFAULTDIMS)
@@ -342,7 +353,7 @@ func (S *PIRDBStorage) checkContext() {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Info("Error while shrinking DB")
 			panic(err)
 		}
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "context": S.Context}).Info("Changing to smaller DB representation")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to smaller DB representation")
 		S.encode()
 	}
 }
@@ -350,27 +361,37 @@ func (S *PIRDBStorage) checkContext() {
 // Worker which periodically sweaps the cache
 func (S *PIRDBStorage) Sweaper() {
 	for true {
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR"}).Info("Starting sweaping routine")
+		utils.Logger.WithFields(logrus.Fields{"service": "cache", "ttl(s)": CACHETTL}).Info("Starting sweaping routine")
 		S.Mux.Lock()
 		S.Db.Range(func(key, value any) bool {
+			utils.Logger.WithFields(logrus.Fields{"service": "cache", "key": key}).Info("Sweaping Entry")
 			S.Items -= value.(*PIRDBEntry).Sweap()
 			return true
 		})
 		S.Mux.Unlock()
-		time.Sleep(time.Duration(CACHETTL))
+		time.Sleep(time.Duration(CACHETTL) * time.Second)
 	}
 }
 
 func (S *PIRDBStorage) Load(key interface{}) (interface{}, bool) {
-	v, ok := S.Load(key.(string))
+	v, ok := S.Db.Load(key.(string))
 	return v, ok
 }
 
-// Save keys from profile of client. Caller should verify the consistency of the context in which the profile was generated
-func (PS *PIRServer) AddProfile(clientId string, pf *settings.PIRProfile) {
-	if pf.Rlk != nil && pf.Rtks != nil {
-		PS.Profiles[clientId] = &settings.PIRProfile{Rtks: pf.Rtks, Rlk: pf.Rlk} //store only keys
+// Save keys from profile of pb. Caller should verify the consistency of the context in which the profile was generated
+func (PS *PIRServer) AddProfile(clientId string, leakage int, pf *settings.PIRProfile) {
+	ctx := PS.Storage.getContext()
+	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Adding profile")
+	if _, ok := PS.Profiles[ctx.Hash()]; !ok {
+		PS.Profiles[ctx.Hash()] = make(map[string]*settings.PIRProfileSet)
 	}
+	if pf != nil {
+		if _, ok := PS.Profiles[ctx.Hash()][clientId]; !ok {
+			PS.Profiles[ctx.Hash()][clientId] = settings.NewProfileSet()
+		}
+		PS.Profiles[ctx.Hash()][clientId].P[leakage] = pf
+	}
+	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile Added")
 }
 
 func (PS *PIRServer) GetContext() *settings.PirContext {
@@ -379,31 +400,32 @@ func (PS *PIRServer) GetContext() *settings.PirContext {
 	return ctx
 }
 
-func (PS *PIRServer) GetParams() bfv.ParametersLiteral {
-	PS.Storage.Mux.RLock()
-	defer PS.Storage.Mux.RUnlock()
-	return PS.Params.ParametersLiteral()
-}
-
 // Set up an HE box from clientID (fetch keys) and params
-func (PS *PIRServer) WithParams(params bfv.Parameters, clientId string) (*settings.HeBox, error) {
+func (PS *PIRServer) WithParams(clientId string, leakage int) (*settings.HeBox, error) {
 	//set up box from profile
 	box := new(settings.HeBox)
-	if p, ok := PS.Profiles[clientId]; !ok {
+	ctx := PS.Storage.getContext()
+	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Fetching profile")
+	if p, ok := PS.Profiles[ctx.Hash()][clientId]; !ok {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("profile not found %s for creating HEBOX", clientId)}).Error("Error")
 		return nil, errors.New(fmt.Sprintf("%s profile not found", clientId))
 	} else {
+		//take set of params from client profiles according to leakage
+		params, err := bfv.NewParametersFromLiteral(settings.PARAMS[p.P[leakage].ParamsId])
+		if err != nil {
+			return nil, err
+		}
 		box = &settings.HeBox{
 			Params: params,
 			Ecd:    bfv.NewEncoder(params),
 			Evt: bfv.NewEvaluator(params, rlwe.EvaluationKey{
-				Rlk:  p.Rlk,
-				Rtks: p.Rtks,
+				Rlk:  p.P[leakage].Rlk,
+				Rtks: p.P[leakage].Rtks,
 			}),
-			Rtks: p.Rtks,
-			Rlk:  p.Rlk,
+			Rtks: p.P[leakage].Rtks,
+			Rlk:  p.P[leakage].Rlk,
 		}
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "clientID": clientId}).Info("Created HEBOX")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile found, created HEBox")
 		return box, nil
 	}
 }
@@ -419,21 +441,17 @@ func invNTTforExpand(expandedCts []*rlwe.Ciphertext, t int, Q *ring.Ring) []*rlw
 	return expandedCts[:t]
 }
 
-// Obliviously expands a compressed query vector. Client must provide rotation keys. Returns an array of interfaces, where each element is either a []*rlwe.Ciphertext or an int that represents the index for that dimention
-func (S *PIRDBStorage) obliviousExpand(query []interface{}, box *settings.HeBox) ([]interface{}, error) {
+// Obliviously expands a compressed query vector. Client must provide rotation keys. Returns an array of []*rlwe.Ciphertext
+func (S *PIRDBStorage) obliviousExpand(query []interface{}, box *settings.HeBox) ([][]*rlwe.Ciphertext, error) {
 	//Procedure 7 from https://eprint.iacr.org/2019/1483.pdf
-	Kd, dimentions := S.Context.Kd, S.Context.Dim
+	Kd := S.Context.Kd
 	evt := rlwe.NewEvaluator(box.Params.Parameters, &rlwe.EvaluationKey{Rtks: box.Rtks})
-	if len(query) != dimentions {
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("Query vector has not the right size. Expected %d got %d", dimentions, len(query))}).Error("ObliviousExpand")
-		return nil, errors.New(fmt.Sprintf("Query vector has not the right size. Expected %d got %d", dimentions, len(query)))
-	}
 	logm := int(math.Ceil(math.Log2(float64(Kd))))
 	if logm > box.Params.LogN() {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": "Dimention > N not allowed"}).Error("ObliviousExpand")
 		return nil, errors.New("m > N is not allowed")
 	}
-	expanded := make([]interface{}, dimentions)
+	expanded := make([][]*rlwe.Ciphertext, len(query))
 	var err error
 	var wg sync.WaitGroup
 	for j := range query {
@@ -443,8 +461,6 @@ func (S *PIRDBStorage) obliviousExpand(query []interface{}, box *settings.HeBox)
 			switch query[j].(type) {
 			case *rlwe.Ciphertext:
 				expanded[j] = invNTTforExpand(evt.ShallowCopy().Expand(query[j].(*rlwe.Ciphertext), logm, 0), Kd, box.Params.RingQ())
-			case int:
-				expanded[j] = query[j]
 			default:
 				utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("Unknown type in %T", query[j])}).Error("ObliviousExpand")
 				err = errors.New(fmt.Sprintf("Unknown type in %T", query[j]))
@@ -456,40 +472,41 @@ func (S *PIRDBStorage) obliviousExpand(query []interface{}, box *settings.HeBox)
 }
 
 // Takes a PIRQuery, Returns an array of interfaces, where each element is either a []*rlwe.Ciphertext or an int that represents the index for that dimention
-func (S *PIRDBStorage) processPIRQuery(queryRecvd *pir.PIRQuery, box *settings.HeBox) ([]interface{}, error) {
-	var query []interface{} //each entry is either an array of ciphertexts or directly the index to retrieve for this dimention for WPIR
+func (S *PIRDBStorage) processPIRQuery(queryRecvd *messages.PIRQuery, box *settings.HeBox) ([][]*rlwe.Ciphertext, error) {
+	var query [][]*rlwe.Ciphertext
 	//Initialize sampler from user seed
-	sampler, err := pir.NewSampler(queryRecvd.Seed, box.Params)
+	sampler, err := messages.NewSampler(queryRecvd.Seed, box.Params)
 	if err != nil {
 		return nil, err
 	}
 
-	switch queryRecvd.Q.(type) {
-	case []*pir.PIRQueryItem:
+	if queryRecvd.Q.Compressed != nil {
 		var err error
 		if box.Rtks == nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": "Client needs to provide rtks"}).Error("processPIRQuery")
 			return nil, errors.New("Client needs to provide rotation keys for Expand")
 		}
-		queryDecompressed, err := pir.DecompressCT(queryRecvd.Q, *sampler, box.Params)
+		queryDecompressed, err := messages.DecompressCT(queryRecvd.Q.Compressed, *sampler, box.Params)
 		query, err = S.obliviousExpand(queryDecompressed, box)
 		if err != nil {
 			return nil, err
 		}
-	case [][]*pir.PIRQueryItem:
-		queryDecompressed, err := pir.DecompressCT(queryRecvd.Q, *sampler, box.Params)
+	} else if queryRecvd.Q.Expanded != nil {
+		queryDecompressed, err := messages.DecompressCT(queryRecvd.Q.Expanded, *sampler, box.Params)
 		if err != nil {
 			return nil, err
 		}
-		query = queryDecompressed
-	default:
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("Query must be []*rlwe.Ciphertext or [][]*rlwe.Ciphertext, not %T", query)}).Error("processPIRQuery")
-
-		return nil, errors.New(fmt.Sprintf("Query must be []*rlwe.Ciphertext or [][]*rlwe.Ciphertext, not %T", query))
+		for _, qd := range queryDecompressed {
+			query = append(query, qd.([]*rlwe.Ciphertext))
+		}
+	} else {
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": "Bad container"}).Error("processPIRQuery")
+		return nil, errors.New("Bad container")
 	}
 	return query, nil
 }
 
+// Message for concurrent multiplication algorithm
 type multiplierTask struct {
 	Query      *rlwe.Ciphertext
 	Values     interface{} //from db
@@ -499,48 +516,78 @@ type multiplierTask struct {
 }
 
 /*
-Given an encoded PIR database and a query from pb, answers the query.
+Given a query in the form (prefix, ciphers) answers.
 The query can be represented as:
-  - a series query vectors of ciphertexts. In each vector (we have d vectors for d dimentions), each ciphertext is Enc(0), but for one
-    where ct is Enc(1). If this ct is the ct in position i-th, then you will retrieve all associated to index i for this dimention
+  - a prefix, as a series of key coords ("C0|C1..." or ""), depending on the information leakage
   - a series of d ciphertexts. In this case the query goes through an oblivious expansion procedure that generates the same query as case 1
     For every bucket (which consists of N (ring size of BFV) entries, with 1 or more data items), it multiplies the bucket
     with the associated ciphertext in the query.
     After that, all these results get accumulated by summing the results.
     Returns a list of ciphertexts, i.e the answer, which is the result of the accumulation
     between all buckets in the server multiplied by the query. Ideally only one element in a certain bucket will survive
-    the selection. The resulting bucket is returned to the pb which can decrypt the answer and retrieve the value
+    the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
 */
-func (S *PIRDBStorage) answerGen(box *settings.HeBox, query []interface{}) ([]*rlwe.Ciphertext, error) {
+func (S *PIRDBStorage) answerGen(box *settings.HeBox, prefix string, query [][]*rlwe.Ciphertext) ([]*rlwe.Ciphertext, error) {
 	var ecdStore Storage
 	ecdStore = S
 	Kd, Dimentions := S.Context.Kd, S.Context.Dim
 	evt := bfv.NewEvaluator(box.Params, rlwe.EvaluationKey{Rlk: box.Rlk})
 	ecd := bfv.NewEncoder(box.Params)
-	if Kd != len(query[len(query)-1].([]*rlwe.Ciphertext)) {
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", Kd, len(query[len(query)-1].([]*rlwe.Ciphertext)))}).Error("answerGen")
-		return nil, errors.New(fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", Kd, len(query[len(query)-1].([]*rlwe.Ciphertext))))
+	skippedDims := 0
+	for _, s := range strings.Split(prefix, "|") {
+		if s != "" {
+			skippedDims++
+		}
 	}
-	if Dimentions != len(query) {
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", Dimentions, len(query))}).Error("answerGen")
 
-		return nil, errors.New(fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", Dimentions, len(query)))
+	if Kd != len(query[len(query)-1]) {
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", Kd, len(query[len(query)-1]))}).Error("answerGen")
+		return nil, errors.New(fmt.Sprintf("queryExp vector has not the right size. Expected %d got %d", Kd, len(query[len(query)-1])))
+	}
+	if Dimentions != len(query)+skippedDims {
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", Dimentions, len(query)+skippedDims)}).Error("answerGen")
+		return nil, errors.New(fmt.Sprintf("Dimentionality mismatch. Expected %d got %d", Dimentions, len(query)+skippedDims))
+	}
+	var wg sync.WaitGroup //sync graceful termination
+	//filter dimentions
+	if prefix != "" {
+		keys := make([]string, 0)
+		utils.GenKeysAtDepth(prefix, skippedDims, Dimentions, Kd, &keys)
+		tmpStorage := new(sync.Map)
+		filterChan := make(chan struct{}, runtime.NumCPU())
+		for i := 0; i < runtime.NumCPU(); i++ {
+			filterChan <- struct{}{}
+		}
+		for _, key := range keys {
+			wg.Add(1)
+			<-filterChan
+			go func(k string) {
+				defer wg.Done()
+				if v, ok := ecdStore.Load(k); ok {
+					nextk := strings.TrimPrefix(k, prefix+"|")
+					tmpStorage.Store(nextk, v)
+				}
+				filterChan <- struct{}{}
+			}(key)
+		}
+		wg.Wait()
+		ecdStore = tmpStorage
 	}
 
 	//spawnMultipliers
-	taskCh := make(chan multiplierTask, runtime.NumCPU())
-	var wg sync.WaitGroup //sync graceful termination
-	for i := 0; i < runtime.NumCPU(); i++ {
+	taskCh := make(chan multiplierTask, runtime.NumCPU()) //runtime.NumCPU()
+
+	for i := 0; i < runtime.NumCPU(); i++ { //runtime.NumCPU()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			SpawnMultiplier(evt.ShallowCopy(), ecd.ShallowCopy(), box.Params, taskCh)
+			spawnMultiplier(evt.ShallowCopy(), ecd.ShallowCopy(), box.Params, taskCh)
 		}()
 	}
 
 	finalAnswer := make([]*rlwe.Ciphertext, 0)
 	var err error
-	for d := 0; d < Dimentions; d++ {
+	for d := 0; d < len(query); d++ {
 		//loop over all dimentions of the hypercube
 
 		//fmt.Println("dimention ", d+1)
@@ -549,73 +596,36 @@ func (S *PIRDBStorage) answerGen(box *settings.HeBox, query []interface{}) ([]*r
 		nextStore := NewPirStorage()
 		//builds access to storage in a recursive way
 		keys := make([]string, 0)
-		utils.GenKeysAtDepth("", d+1, Dimentions, Kd, &keys)
+		utils.GenKeysAtDepth("", d+skippedDims+1, Dimentions, Kd, &keys)
 
-		finalRound := d == Dimentions-1
+		finalRound := d == len(query)-1
 
 		numEffectiveKeys := 0                          //keeps track of how many entries are effectively in storage at a given dim
 		numComputedKeys := 0                           //keeps track of how many query x entry results have been computed in storage at a given dim
 		feedbackCh := make(chan int, Kd*(len(keys)+1)) //+1 for final round when len(keys) is 0
-		switch q.(type) {
-		case []*rlwe.Ciphertext:
-			//fmt.Printf("Dimention %d performing mul\n", d+1)
-			for di := 0; di < Kd; di++ {
-				//scan this dimention
-				//fmt.Println("Index: ", di)
-				//utils.ShowCoeffs(q[di], *box)
-				for _, k := range keys {
-					nextK := ""
-					if !finalRound {
-						nextK = k[1:] //remove "|"
-						k = strconv.FormatInt(int64(di), 10) + k
-					} else {
-						k = strconv.FormatInt(int64(di), 10)
-					}
-					//feed multipliers
-					if e, ok := ecdStore.Load(k); ok {
-						numEffectiveKeys++
-						//fmt.Printf("Level: %d x %d, depth: %d\n", q[di].Level(), e.([]rlwe.Operand)[0].Level(), d)
-						taskCh <- multiplierTask{
-							Query:      q.([]*rlwe.Ciphertext)[di],
-							Values:     e,
-							ResultMap:  nextStore,
-							ResultKey:  nextK,
-							FeedBackCh: feedbackCh,
-						}
-					}
-				}
-			}
-		case int:
-			//purge all the keys which do not have the right index for dimention
+		for di := 0; di < Kd; di++ {
+			//scan this dimention
+			//fmt.Println("Index: ", di)
+			//utils.ShowCoeffs(q[di], *box)
 			for _, k := range keys {
-				nextK := k[1:] //remove "|"
-				k = strconv.FormatInt(int64(q.(int)), 10) + k
+				nextK := ""
+				if !finalRound {
+					nextK = k[1:] //remove "|"
+					k = strconv.FormatInt(int64(di), 10) + k
+				} else {
+					k = strconv.FormatInt(int64(di), 10)
+				}
+				//feed multipliers
 				if e, ok := ecdStore.Load(k); ok {
 					numEffectiveKeys++
-					go func(key string, v interface{}) {
-						switch v.(type) {
-						case *PIRDBEntry:
-							v.(*PIRDBEntry).Mux.RLock()
-							ops, err := v.(*PIRDBEntry).EncodeRLWE(settings.TUsableBits, ecd.ShallowCopy(), box.Params)
-							v.(*PIRDBEntry).Mux.RUnlock()
-							if err != nil {
-								panic(err)
-							}
-							entry := NewPirEntry()
-							entry.Ops = ops
-							nextStore.Map.Store(key, entry)
-						case *PIREntry:
-							entry := NewPirEntry()
-							v.(*PIREntry).Mux.RLock()
-							entry.Ops = v.(*PIREntry).Ops
-							v.(*PIREntry).Mux.RUnlock()
-							nextStore.Map.Store(key, v.(*PIREntry))
-						default:
-							utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("Unknown type %T", v)}).Error("answerGen")
-							err = errors.New(fmt.Sprintf("Unknown type %T", v))
-						}
-						feedbackCh <- 1
-					}(nextK, e)
+					//fmt.Printf("Level: %d x %d, depth: %d\n", q[di].Level(), e.([]rlwe.Operand)[0].Level(), d)
+					taskCh <- multiplierTask{
+						Query:      q[di],
+						Values:     e,
+						ResultMap:  nextStore,
+						ResultKey:  nextK,
+						FeedBackCh: feedbackCh,
+					}
 				}
 			}
 		}
@@ -660,7 +670,7 @@ func (S *PIRDBStorage) answerGen(box *settings.HeBox, query []interface{}) ([]*r
 
 // Performs the multiplication between a query vector and a value in the storage, then saves it in result.
 // It receives task via the taskCh
-func SpawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, taskCh chan multiplierTask) {
+func spawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, taskCh chan multiplierTask) {
 	for {
 		task, ok := <-taskCh
 		if !ok {
@@ -683,7 +693,7 @@ func SpawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": fmt.Sprintf("Uknown type %T", task.Values)}).Error("spawnMultiplier")
 			task.FeedBackCh <- 1
 		}
-		intermediateResult := make([]*rlwe.Ciphertext, 0)
+		intermediateResult := make([]rlwe.Operand, 0)
 		for _, op := range values {
 			el := evt.MulNew(task.Query, op)
 			//if el.Degree() > 1 {
@@ -692,7 +702,8 @@ func SpawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 			intermediateResult = append(intermediateResult, el)
 		}
 		//compress (accumulate result with lazy modswitch and relin) atomically
-		if result, loaded := task.ResultMap.Map.LoadOrStore(task.ResultKey, intermediateResult); loaded {
+		if result, loaded := task.ResultMap.Map.LoadOrStore(
+			task.ResultKey, &PIREntry{Mux: new(sync.RWMutex), Ops: intermediateResult}); loaded {
 			result.(*PIREntry).Mux.Lock()
 			for i := 0; i < int(utils.Min(float64(len(intermediateResult)), float64(len(result.(*PIREntry).Ops)))); i++ {
 				evt.Add(result.(*PIREntry).Ops[i].(*rlwe.Ciphertext), intermediateResult[i], result.(*PIREntry).Ops[i].(*rlwe.Ciphertext))
@@ -710,7 +721,9 @@ func SpawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 		task.FeedBackCh <- 1
 	}
 }
-func (S *PIRDBStorage) Answer(query *pir.PIRQuery, box *settings.HeBox) ([]*rlwe.Ciphertext, error) {
+
+// Process and answer a query coming from the pb
+func (S *PIRDBStorage) Answer(query *messages.PIRQuery, box *settings.HeBox) ([]*rlwe.Ciphertext, error) {
 	S.Mux.RLock()
 	defer S.Mux.RUnlock()
 	start := time.Now()
@@ -719,7 +732,7 @@ func (S *PIRDBStorage) Answer(query *pir.PIRQuery, box *settings.HeBox) ([]*rlwe
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Error("Answer")
 		return nil, err
 	}
-	answer, err := S.answerGen(box, queryProc)
+	answer, err := S.answerGen(box, query.Prefix, queryProc)
 	if err != nil {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Error("Answer")
 	}
@@ -728,17 +741,17 @@ func (S *PIRDBStorage) Answer(query *pir.PIRQuery, box *settings.HeBox) ([]*rlwe
 	return answer, err
 }
 
-func (PS *PIRServer) Answer(query *pir.PIRQuery) ([]*rlwe.Ciphertext, error) {
-	box, err := PS.WithParams(PS.Params, query.ClientId)
+func (PS *PIRServer) Answer(query *messages.PIRQuery) ([]*rlwe.Ciphertext, error) {
+	box, err := PS.WithParams(query.ClientId, query.Leakage)
 	if err != nil {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Error("Answer")
 		return nil, err
 	}
+	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "clientId": query.ClientId, "leakage": query.Leakage}).Info("Answering query")
 	return PS.Storage.Answer(query, box)
 }
 
+// Starts the caching daemon of PIR DB
 func (PS *PIRServer) Start() {
-	go func() {
-		PS.cache()
-	}()
+	PS.cache()
 }

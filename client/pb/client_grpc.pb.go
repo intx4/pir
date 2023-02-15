@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.2.0
 // - protoc             v3.6.1
-// source: pb/pb.proto
+// source: client/client.proto
 
 package pb
 
@@ -18,88 +18,88 @@ import (
 // Requires gRPC-Go v1.32.0 or later.
 const _ = grpc.SupportPackageIsVersion7
 
-// InternalClientClient is the pb API for InternalClient service.
+// ProxyClient is the client API for Proxy service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
-type InternalClientClient interface {
-	Query(ctx context.Context, in *InternalRequest, opts ...grpc.CallOption) (*InternalResponse, error)
+type ProxyClient interface {
+	Query(ctx context.Context, in *QueryMessage, opts ...grpc.CallOption) (*AnswerMessage, error)
 }
 
-type internalClientClient struct {
+type proxyClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewInternalClientClient(cc grpc.ClientConnInterface) InternalClientClient {
-	return &internalClientClient{cc}
+func NewProxyClient(cc grpc.ClientConnInterface) ProxyClient {
+	return &proxyClient{cc}
 }
 
-func (c *internalClientClient) Query(ctx context.Context, in *InternalRequest, opts ...grpc.CallOption) (*InternalResponse, error) {
-	out := new(InternalResponse)
-	err := c.cc.Invoke(ctx, "/pb.InternalClient/Query", in, out, opts...)
+func (c *proxyClient) Query(ctx context.Context, in *QueryMessage, opts ...grpc.CallOption) (*AnswerMessage, error) {
+	out := new(AnswerMessage)
+	err := c.cc.Invoke(ctx, "/client.Proxy/Query", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// InternalClientServer is the server API for InternalClient service.
-// All implementations must embed UnimplementedInternalClientServer
+// ProxyServer is the server API for Proxy service.
+// All implementations must embed UnimplementedProxyServer
 // for forward compatibility
-type InternalClientServer interface {
-	Query(context.Context, *InternalRequest) (*InternalResponse, error)
-	mustEmbedUnimplementedInternalClientServer()
+type ProxyServer interface {
+	Query(context.Context, *QueryMessage) (*AnswerMessage, error)
+	mustEmbedUnimplementedProxyServer()
 }
 
-// UnimplementedInternalClientServer must be embedded to have forward compatible implementations.
-type UnimplementedInternalClientServer struct {
+// UnimplementedProxyServer must be embedded to have forward compatible implementations.
+type UnimplementedProxyServer struct {
 }
 
-func (UnimplementedInternalClientServer) Query(context.Context, *InternalRequest) (*InternalResponse, error) {
+func (UnimplementedProxyServer) Query(context.Context, *QueryMessage) (*AnswerMessage, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Query not implemented")
 }
-func (UnimplementedInternalClientServer) mustEmbedUnimplementedInternalClientServer() {}
+func (UnimplementedProxyServer) mustEmbedUnimplementedProxyServer() {}
 
-// UnsafeInternalClientServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to InternalClientServer will
+// UnsafeProxyServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to ProxyServer will
 // result in compilation errors.
-type UnsafeInternalClientServer interface {
-	mustEmbedUnimplementedInternalClientServer()
+type UnsafeProxyServer interface {
+	mustEmbedUnimplementedProxyServer()
 }
 
-func RegisterInternalClientServer(s grpc.ServiceRegistrar, srv InternalClientServer) {
-	s.RegisterService(&InternalClient_ServiceDesc, srv)
+func RegisterProxyServer(s grpc.ServiceRegistrar, srv ProxyServer) {
+	s.RegisterService(&Proxy_ServiceDesc, srv)
 }
 
-func _InternalClient_Query_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(InternalRequest)
+func _Proxy_Query_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(QueryMessage)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(InternalClientServer).Query(ctx, in)
+		return srv.(ProxyServer).Query(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/pb.InternalClient/Query",
+		FullMethod: "/client.Proxy/Query",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(InternalClientServer).Query(ctx, req.(*InternalRequest))
+		return srv.(ProxyServer).Query(ctx, req.(*QueryMessage))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// InternalClient_ServiceDesc is the grpc.ServiceDesc for InternalClient service.
+// Proxy_ServiceDesc is the grpc.ServiceDesc for Proxy service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var InternalClient_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "pb.InternalClient",
-	HandlerType: (*InternalClientServer)(nil),
+var Proxy_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "client.Proxy",
+	HandlerType: (*ProxyServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
 			MethodName: "Query",
-			Handler:    _InternalClient_Query_Handler,
+			Handler:    _Proxy_Query_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "pb/pb.proto",
+	Metadata: "client/client.proto",
 }

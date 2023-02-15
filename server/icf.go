@@ -1,9 +1,5 @@
 package server
 
-// //export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig/python3-embed.pc
-// #cgo pkg-config: python3-embed
-// #include <Python.h>
-import "C"
 import (
 	"context"
 	"encoding/base64"
@@ -11,11 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"github.com/sirupsen/logrus"
-	"github.com/tuneinsight/lattigo/v4/bfv"
 	"google.golang.org/grpc"
 	"log"
 	"net"
-	"pir"
+	"pir/messages"
 	pb "pir/server/pb"
 	"pir/settings"
 	"pir/utils"
@@ -23,8 +18,10 @@ import (
 	"time"
 )
 
-var MAXTTL = 3600 * 24 * 5.0 //5 days
-var CACHETTL = 3600.0        //1 hr
+var MAXTTL int = 3600 * 24 * 5 //5 days in s
+var CACHETTL int = 3600        //1 hr in s
+var FIELDSEPARATOR = ";"
+var DUMMYTIMEPAD = "Z"
 
 type ICFRecord struct {
 	pirDBItem
@@ -65,7 +62,7 @@ func (IR *ICFRecord) SuccinctEncode() []byte {
 
 func (IR *ICFRecord) SuccinctDecode(payload []byte) error {
 	s := string(payload)
-	values := strings.Split(s, ";")
+	values := strings.Split(s, FIELDSEPARATOR)
 	if len(values) != 5 {
 		return errors.New("Wrong Succinct Encoding")
 	}
@@ -76,7 +73,7 @@ func (IR *ICFRecord) SuccinctDecode(payload []byte) error {
 	endTime := values[4]
 	notSet := false
 	for _, c := range endTime {
-		if string(c) == "Z" {
+		if string(c) == DUMMYTIMEPAD {
 			notSet = true
 			break
 		}
@@ -112,216 +109,41 @@ func (IR *ICFRecord) Match(v interface{}) bool {
 }
 
 func (IR *ICFRecord) IsExpired() bool {
-	if time.Since(IR.MaxTTL).Seconds() > MAXTTL {
+	if time.Since(IR.MaxTTL).Seconds() > float64(MAXTTL) {
 		return true
 	}
 	if !IR.CacheTTL.IsZero() {
-		if time.Since(IR.CacheTTL).Seconds() > CACHETTL {
+		if time.Since(IR.CacheTTL).Seconds() > float64(CACHETTL) {
 			return true
 		}
 	}
 	return false
 }
 
-/*
-type ICFCacheEntry struct {
-	Current  *ICFRecord
-	Previous *ICFRecord
+func (IR *ICFRecord) String() string {
+	endTime := IR.EndTimestpm
+	if strings.Contains(endTime, DUMMYTIMEPAD) {
+		endTime = "Still valid"
+	}
+	return fmt.Sprintf("SUPI=%s, SUCI=%s, GUTI=%s, START TIME=%s, END TIME=%s", IR.Supi, IR.Suci, IR.FiveGGUTI, IR.StartTimestmp, endTime)
 }
 
-func NewICFCacheEntry() *ICFCacheEntry {
-	return &ICFCacheEntry{
-		Current:  nil,
-		Previous: nil,
-	}
-}
-
-// Currently active association is marked as previously active, and new one is registered as current
-func (CE *ICFCacheEntry) NewAssociation(record *IEFAssociationRecord) int {
-	added := 0
-	if CE.Current != nil {
-		if CE.Previous == nil {
-			CE.Previous = new(ICFRecord)
-			added++
-			CE.Previous.MaxTTL = time.Now()
-		}
-		*CE.Previous = *CE.Current
-	}
-	if CE.Previous != nil {
-		CE.Previous.EndTimestpm = record.Timestmp
-		CE.Previous.CacheTTL = time.Now()
-	}
-	if CE.Current == nil {
-		CE.Current = new(ICFRecord)
-		added++
-		CE.Current.MaxTTL = time.Now()
-	}
-	CE.Current.Supi = record.Supi
-	CE.Current.Suci = record.Suci
-	CE.Current.FiveGGUTI = record.FiveGGUTI
-	CE.Current.StartTimestmp = record.Timestmp
-	CE.Current.Tai = record.Tai
-	CE.Current.Ncgi = record.Ncgi
-	CE.Current.NcgiTime = record.NcgiTime
-	CE.Current.Pei = record.Pei
-	CE.Current.ListOfTai = record.ListOfTai
-	return added
-}
-
-// IEFDeassociation event is received : currently active is marked as deassociated
-func (CE *ICFCacheEntry) NewDeassociation(record *IEFDeassociationRecord) {
-	if CE.Current != nil {
-		if CE.Current.FiveGGUTI == record.FiveGGUTI {
-			if CE.Previous == nil {
-				CE.Previous = new(ICFRecord)
-				CE.Previous.MaxTTL = time.Now()
-			}
-			*CE.Previous = *CE.Current
-			CE.Previous.EndTimestpm = record.Timestmp
-			CE.Previous.CacheTTL = time.Now()
-			CE.Current = nil
-		}
-	} else if CE.Previous != nil {
-		if CE.Previous.FiveGGUTI == record.FiveGGUTI {
-			CE.Previous.Supi = record.Supi
-			CE.Previous.FiveGGUTI = record.FiveGGUTI
-			CE.Previous.Ncgi = record.Ncgi
-			CE.Previous.NcgiTime = record.NcgiTime
-			CE.Previous.EndTimestpm = record.Timestmp
-		}
-	}
-}
-
-type ICFCache struct {
-	lock *sync.RWMutex
-	Db   map[string]*ICFCacheEntry
-	Size int //num of records
-}
-
-func NewICFCache() *ICFCache {
-	return &ICFCache{
-		lock: new(sync.RWMutex),
-		Db:   make(map[string]*ICFCacheEntry),
-	}
-}
-
-func (IC *ICFCache) NewRecord(record *IEFRecord) {
-	IC.lock.Lock()
-	defer IC.lock.Unlock()
-	if record.Assoc != nil {
-		if entry, ok := IC.Db[record.Assoc.Supi]; ok {
-			IC.Size += entry.NewAssociation(record.Assoc)
-		} else {
-			entry = NewICFCacheEntry()
-			IC.Size += entry.NewAssociation(record.Assoc)
-		}
-	} else if record.DeAssoc != nil {
-		if entry, ok := IC.Db[record.DeAssoc.Supi]; ok {
-			entry.NewDeassociation(record.DeAssoc)
-		}
-	}
-}
-
-// Sweap cache every ttl seconds
-func (IC *ICFCache) Sweap(ttl float64) {
-	for true {
-		IC.lock.Lock()
-		var expired []string
-		for k, v := range IC.Db {
-			if ttl == MAXTTL {
-				if v.Current != nil {
-					if time.Since(v.Current.MaxTTL).Seconds() >= MAXTTL {
-						v.Current = nil
-						IC.Size--
-					}
-				}
-				if v.Previous != nil {
-					if time.Since(v.Previous.MaxTTL).Seconds() >= MAXTTL {
-						v.Previous = nil
-						IC.Size--
-					}
-				}
-			} else if ttl == CACHETTL {
-				//looks for deassociated events
-				if v.Previous != nil {
-					if time.Since(v.Previous.CacheTTL).Seconds() >= CACHETTL {
-						v.Previous = nil
-						IC.Size--
-					}
-				}
-			}
-			if v.Current == nil && v.Previous == nil {
-				expired = append(expired, k)
-			}
-		}
-		for _, k := range expired {
-			delete(IC.Db, k)
-		}
-		time.Sleep(3600 * time.Second)
-	}
-}
-
-// Takes a snapshot of current cache state
-func (IC *ICFCache) TakeSnapshot(byGUTI bool, bySUCI bool) map[string][]byte {
-	IC.lock.RLock()
-	defer IC.lock.RUnlock()
-
-	db := make(map[string][]byte)
-	for _, v := range IC.Db {
-		if v.Current != nil {
-			if bySUCI {
-				if _, ok := db[v.Current.Suci]; !ok {
-					db[v.Current.Suci] = v.Current.SuccinctEncode()
-				} else {
-					db[v.Current.Suci] = append(db[v.Current.Suci], []byte(";;")...)
-					db[v.Current.Suci] = append(db[v.Current.Suci], v.Current.SuccinctEncode()...)
-				}
-			} else if byGUTI {
-				if _, ok := db[v.Current.FiveGGUTI]; !ok {
-					db[v.Current.FiveGGUTI] = v.Current.SuccinctEncode()
-				} else {
-					db[v.Current.FiveGGUTI] = append(db[v.Current.FiveGGUTI], []byte(";;")...)
-					db[v.Current.FiveGGUTI] = append(db[v.Current.FiveGGUTI], v.Current.SuccinctEncode()...)
-				}
-			}
-		}
-		if v.Previous != nil {
-			if bySUCI {
-				if _, ok := db[v.Previous.Suci]; !ok {
-					db[v.Previous.Suci] = v.Previous.SuccinctEncode()
-				} else {
-					db[v.Previous.Suci] = append(db[v.Previous.Suci], []byte(";;")...)
-					db[v.Previous.Suci] = append(db[v.Previous.Suci], v.Previous.SuccinctEncode()...)
-				}
-			} else if byGUTI {
-				if _, ok := db[v.Previous.FiveGGUTI]; !ok {
-					db[v.Previous.FiveGGUTI] = v.Previous.SuccinctEncode()
-				} else {
-					db[v.Previous.FiveGGUTI] = append(db[v.Previous.FiveGGUTI], []byte(";;")...)
-					db[v.Previous.FiveGGUTI] = append(db[v.Previous.FiveGGUTI], v.Previous.SuccinctEncode()...)
-				}
-			}
-		}
-	}
-	return db
-}
-*/
-
+// Defines the ICF, with an internal PIR enabled server, a XER server
+// The ICF implements a GRPC server to listen to IQF
 type ICF struct {
 	pb.UnimplementedInternalServerServer
 	pirServer *PIRServer
 	xerServer *XerServer
-	//cache        *ICFCache
+	grpcPort  string
 }
 
-func NewICF(xerAddr string, xerPort string) (*ICF, error) {
+func NewICF(xerAddr string, xerPort string, grpcPort string) (*ICF, error) {
 	recordChan := make(chan *IEFRecord)
 	xerServer, err := NewXerServer(xerAddr, xerPort, recordChan)
 	if err != nil {
 		return nil, err
 	}
-	params, _ := bfv.NewParametersFromLiteral(settings.DEFAULTPARAMS)
-	pirServer, err := NewPirServer(recordChan, params)
+	pirServer, err := NewPirServer(recordChan)
 	//assumption on data size = 300B
 	if err != nil {
 		return nil, err
@@ -329,91 +151,89 @@ func NewICF(xerAddr string, xerPort string) (*ICF, error) {
 	return &ICF{
 		pirServer: pirServer,
 		xerServer: xerServer,
+		grpcPort:  grpcPort,
 	}, nil
 }
 
 func (I *ICF) mustEmbedUnimplementedInternalServerServer() {}
 
+// GRPC service, entry point to WPIR protocol
 func (I *ICF) Query(ctx context.Context, request *pb.InternalRequest) (*pb.InternalResponse, error) {
-	pirQuery := &pir.PIRQuery{}
-	pirAnswer := &pir.PIRAnswer{}
+	pirQuery := &messages.PIRQuery{}
+	pirAnswer := &messages.PIRAnswer{}
 	utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Received GRPC request")
 	data, err := base64.StdEncoding.DecodeString(request.Query)
 	if err != nil {
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error")
-		pirAnswer = &pir.PIRAnswer{
-			Answer:  nil,
-			Context: I.pirServer.GetContext(),
-			Error:   settings.Base64Error + err.Error(),
-			Ok:      false,
-			Params:  I.pirServer.Params.ParametersLiteral(),
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error Decoding B64 query")
+		pirAnswer = &messages.PIRAnswer{
+			Answer:       nil,
+			Context:      I.pirServer.GetContext(),
+			Error:        settings.Base64Error + err.Error(),
+			FetchContext: false,
+			Ok:           false,
 		}
 	} else {
 		err = json.Unmarshal(data, pirQuery)
 		if err != nil {
-			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error")
-			pirAnswer = &pir.PIRAnswer{
-				Answer:  nil,
-				Context: I.pirServer.GetContext(),
-				Error:   settings.JsonError + err.Error(),
-				Ok:      false,
-				Params:  I.pirServer.Params.ParametersLiteral(),
+			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error Unmarshaling pirQuery")
+			pirAnswer = &messages.PIRAnswer{
+				Answer:       nil,
+				Context:      I.pirServer.GetContext(),
+				Error:        settings.JsonError + err.Error(),
+				Ok:           false,
+				FetchContext: false,
 			}
-		}
-		if pirQuery.Profile != nil {
-			if I.pirServer.GetContext().K == pirQuery.Profile.Context.K &&
-				I.pirServer.GetContext().Dim == pirQuery.Profile.Context.Dim &&
-				I.pirServer.GetContext().N == pirQuery.Profile.Context.N &&
-				I.pirServer.GetContext().Kd == pirQuery.Profile.Context.Kd {
-				I.pirServer.AddProfile(pirQuery.ClientId, pirQuery.Profile)
+		} else if pirQuery.Profile != nil {
+			if I.pirServer.GetContext().Hash() == pirQuery.Profile.ContextHash {
+				I.pirServer.AddProfile(pirQuery.ClientId, pirQuery.Leakage, pirQuery.Profile)
 				answer, err := I.pirServer.Answer(pirQuery)
 				if err != nil {
 					utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error")
-					pirAnswer = &pir.PIRAnswer{
-						Answer:  nil,
-						Context: I.pirServer.GetContext(),
-						Error:   settings.PirError + err.Error(),
-						Ok:      false,
-						Params:  I.pirServer.Params.ParametersLiteral(),
+					pirAnswer = &messages.PIRAnswer{
+						Answer:       nil,
+						Context:      I.pirServer.GetContext(),
+						Error:        settings.PirError + err.Error(),
+						Ok:           false,
+						FetchContext: false,
 					}
 				} else {
-					utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("PIR Answer computed")
-					pirAnswer = &pir.PIRAnswer{
-						Answer:  answer,
-						Context: I.pirServer.GetContext(),
-						Error:   "",
-						Ok:      true,
-						Params:  I.pirServer.Params.ParametersLiteral(),
+					utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "answer len": len(answer)}).Info("PIR Answer computed")
+					pirAnswer = &messages.PIRAnswer{
+						Answer:       answer,
+						Context:      I.pirServer.GetContext(),
+						Error:        "",
+						Ok:           true,
+						FetchContext: false,
 					}
 				}
 			} else {
 				utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": settings.ContextError}).Error("Error")
-				pirAnswer = &pir.PIRAnswer{
-					Answer:  nil,
-					Context: I.pirServer.GetContext(),
-					Error:   settings.ContextError,
-					Ok:      false,
-					Params:  I.pirServer.Params.ParametersLiteral(),
+				pirAnswer = &messages.PIRAnswer{
+					Answer:       nil,
+					Context:      I.pirServer.GetContext(),
+					Error:        settings.ContextError,
+					Ok:           false,
+					FetchContext: false,
 				}
 			}
 		} else {
 			if pirQuery.FetchContext {
 				utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Fetch Context request")
-				pirAnswer = &pir.PIRAnswer{
-					Answer:  nil,
-					Context: I.pirServer.GetContext(),
-					Error:   "",
-					Ok:      true,
-					Params:  I.pirServer.Params.ParametersLiteral(),
+				pirAnswer = &messages.PIRAnswer{
+					Answer:       nil,
+					Context:      I.pirServer.GetContext(),
+					Error:        "",
+					Ok:           true,
+					FetchContext: true,
 				}
 			} else {
 				utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": settings.MissingProfileError}).Error("Error")
-				pirAnswer = &pir.PIRAnswer{
-					Answer:  nil,
-					Context: I.pirServer.GetContext(),
-					Error:   settings.MissingProfileError,
-					Ok:      false,
-					Params:  I.pirServer.Params.ParametersLiteral(),
+				pirAnswer = &messages.PIRAnswer{
+					Answer:       nil,
+					Context:      I.pirServer.GetContext(),
+					Error:        settings.MissingProfileError,
+					Ok:           false,
+					FetchContext: false,
 				}
 			}
 		}
@@ -423,10 +243,11 @@ func (I *ICF) Query(ctx context.Context, request *pb.InternalRequest) (*pb.Inter
 		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error")
 		return nil, err
 	}
+	utils.Logger.WithFields(logrus.Fields{"service": "gRPC", "data": base64.StdEncoding.EncodeToString(data)}).Debug("Sending gRPC response")
 	return &pb.InternalResponse{Answer: base64.StdEncoding.EncodeToString(data)}, nil
 }
 
-// Starts XER server to interface with IEF and GRPC server to interface with Python client serving IQF. Blocking
+// Starts XER server to interface with IEF, PIR server and GRPC server to interface with Python pb serving IQF. Blocking
 func (I *ICF) Start() {
 	go func() {
 		err := I.xerServer.Start()
@@ -437,17 +258,21 @@ func (I *ICF) Start() {
 	go func() {
 		I.pirServer.Start()
 	}()
-	listener, err := net.Listen("tcp", ":48888")
+	listener, err := net.Listen("tcp", "127.0.0.1:"+I.grpcPort)
 	if err != nil {
+		utils.Logger.Error(err.Error())
 		panic(err)
 	}
-	server := grpc.NewServer()
+	server := grpc.NewServer(
+		grpc.MaxRecvMsgSize(200*1024*1024),
+		grpc.MaxSendMsgSize(200*1024*1024))
+
 	pb.RegisterInternalServerServer(server, I)
+	utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "port": I.grpcPort}).Info("GRPC Internal server started")
 	if err := server.Serve(listener); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 		utils.Logger.Error(err.Error())
 	}
-	utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "port": "48888"}).Info("GRPC Internal server started")
 }
 
 // Wrapper for testing needed for cgo

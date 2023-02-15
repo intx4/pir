@@ -1,0 +1,33 @@
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.capture_item:hover {
+  background-color: #616161;
+}
+
+.red_assoc{
+  color: red;
+
+}
+
+.yellow_assoc{
+  color: yellow;
+
+}
+
+.green_assoc{
+color: greenyellow;
+
+}

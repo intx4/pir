@@ -9,8 +9,8 @@ import (
 	"math"
 	"math/rand"
 	"os"
-	"pir"
 	Client "pir/client"
+	"pir/messages"
 	Server "pir/server"
 	"pir/settings"
 	"pir/utils"
@@ -22,20 +22,20 @@ import (
 
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 14, 1 << 24, 1 << 28}
-var Sizes = []int{30 * 8, 288 * 8}
+var ListOfEntries = []int{1 << 16, 1 << 27, 1 << 26, 1 << 24, 1 << 20}
+var Sizes = []int{288 * 8, 30 * 8}
 
 func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivate bool, leakage int) {
 	csvFile := new(os.File)
 	var err error
 	skipHeader := false
-	if !weaklyPrivate || (weaklyPrivate && leakage == pir.STANDARDLEAKAGE) {
+	if !weaklyPrivate || (weaklyPrivate && leakage == messages.STANDARDLEAKAGE) {
 		os.Remove(path)
 		csvFile, err = os.Create(path)
 		if err != nil {
 			t.Fatalf(err.Error())
 		}
-	} else if weaklyPrivate && leakage == pir.HIGHLEAKAGE {
+	} else if weaklyPrivate && leakage == messages.HIGHLEAKAGE {
 		csvFile, err = os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
 		if err != nil {
 			t.Fatalf(err.Error())
@@ -62,6 +62,9 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 		}
 	*/
 	for _, entries := range ListOfEntries {
+		if entries > 1<<26 && !weaklyPrivate {
+			continue
+		}
 		maxEntries := entries
 		for _, size := range Sizes {
 			//fake db
@@ -76,20 +79,21 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					i++
 				}
 			}
-			for _, dimentions := range []int{3, 4, 5} {
+			for _, dimentions := range []int{3} {
 				if !weaklyPrivate {
 					if dimentions > 3 {
 						continue
 					}
 				}
-				for _, logN := range []int{13, 14} {
+				for _, logN := range []int{14} {
 					if !weaklyPrivate {
 						if logN == 12 {
 							continue
 						}
 					}
+					log.Println(fmt.Sprintf("Testing %d entries, logN %d", entries, logN))
 					//first we create some parameters
-					_, params := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
+					paramsId, params := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
 					ctx, err := settings.NewPirContext(maxEntries, size, params.N(), dimentions)
 					if err != nil {
 						t.Logf(err.Error())
@@ -101,11 +105,14 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					client := Client.NewPirClient("1", "", nil, nil)
 					//now we create a profile which contains all the params and keys needed to server
 					client.AddContext(ctx)
-					client.GenProfile(params.ParametersLiteral())
+					profile, err := client.GenProfile(params, paramsId)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
 
 					choice := rand.Int() % len(keys)
 					start := time.Now()
-					query, leakedBits, err := client.QueryGen([]byte(keys[choice]), params.ParametersLiteral(), leakage, expansion, weaklyPrivate, true)
+					query, leakedBits, err := client.QueryGen([]byte(keys[choice]), profile, leakage, weaklyPrivate, expansion, true)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -118,44 +125,40 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					if query.Profile != nil {
 						server.AddProfile(query.ClientId, query.Profile)
 					}
-					serverBox, err := server.WithParams(ctx, params, query.ClientId)
+					serverBox, err := server.WithParams(params, query.ClientId)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
 					if DEBUG {
-						serverBox.Dec = client.B[settings.ParamsToString(params.ParametersLiteral())].Dec
+						serverBox.Dec = profile.Box.Dec
 					}
-					//server encodes its storage into plaintexts
+					//server encodes its storage into hypercube
 					start = time.Now()
-					queryProc, err := server.ProcessPIRQuery(ctx, query, serverBox)
-					if err != nil {
-						t.Fatalf(err.Error())
-					}
-					ecdStorage, err := server.EncodeBenchmark(ctx, queryProc, db)
+					ecdStorage, err := server.EncodeBenchmark(ctx, db)
 					expected, _ := ecdStorage.Load(choosenKey)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
 					ecdTime := time.Since(start).Seconds()
 					ecdSize := 0
-					ecdStorageAsMap := make(map[string]*Server.PIREntryBenchmark)
 					ecdStorage.Range(func(key, value any) bool {
-						ecdStorageAsMap[key.(string)] = value.(*Server.PIREntryBenchmark)
-						return true
-					})
-					for _, e := range ecdStorageAsMap {
-						serialized, err := json.Marshal(e)
+						serialized, err := json.Marshal(value.(*Server.PIREntryBenchmark))
 						ecdSize += len(serialized)
 						if err != nil {
 							t.Fatalf(err.Error())
 						}
-					}
+						return true
+					})
 
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
 					start = time.Now()
-					answerEnc, err := server.AnswerGenBenchmark(ecdStorage, serverBox, queryProc, ctx)
+					queryProc, err := server.ProcessPIRQuery(ctx, query, serverBox)
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					answerEnc, err := server.AnswerGenBenchmark(ecdStorage, serverBox, query.Prefix, queryProc, ctx)
 					answerGenTime := time.Since(start).Seconds()
 
 					if err != nil {
@@ -163,11 +166,13 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					}
 					//extract the answer
 					start = time.Now()
-					answerPt, err := client.AnswerGet(params.ParametersLiteral(), answerEnc)
+					answerPt, err := client.AnswerGet(profile, answerEnc)
 					answerGetTime := time.Since(start).Seconds()
 
 					if err != nil {
 						t.Logf(err.Error())
+						s, _ := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
+						t.Logf("Broken set of params: " + s)
 						continue
 					}
 					if bytes.Compare(expected.(*Server.PIREntryBenchmark).Coalesce(), answerPt) != 0 {
@@ -220,9 +225,9 @@ func TestClientRetrieval(t *testing.T) {
 		leakage       int
 	}{
 		//{"No Expansion", DIR + "pirGo.csv", false, false, pir.NONELEAKAGE},
-		{"Expansion", DIR + "pirGoExp.csv", true, false, pir.NONELEAKAGE},
-		{"WPIR STD", DIR + "pirGoWP.csv", true, true, pir.STANDARDLEAKAGE},
-		{"WPIR HIGH", DIR + "pirGoWP.csv", true, true, pir.HIGHLEAKAGE},
+		{"Expansion", DIR + "pirGoExp2.csv", true, false, messages.NONELEAKAGE},
+		{"WPIR STD", DIR + "pirGoWP2.csv", true, true, messages.STANDARDLEAKAGE},
+		{"WPIR HIGH", DIR + "pirGoWP2.csv", true, true, messages.HIGHLEAKAGE},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

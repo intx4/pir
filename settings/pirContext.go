@@ -1,6 +1,9 @@
 package settings
 
 import (
+	"crypto/md5"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"github.com/davidkleiven/gononlin/nonlin"
 	"math"
@@ -71,7 +74,7 @@ func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, err
 				break
 			}
 		}
-		if math.Ceil((dc+1)*math.Log(K)) < float64(ctx.MaxBinSize) && dc != 0.0 {
+		if math.Ceil((dc+1)*math.Log(K)) < 1.1*float64(ctx.MaxBinSize) && dc != 0.0 {
 			ctx.ExpBinSize = int(math.Ceil((dc + 1) * math.Log(K)))
 			ctx.K, ctx.Kd = RoundUpToDim(K, Dimentions)
 			ctx.Dim = Dimentions
@@ -87,4 +90,14 @@ func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, err
 		return nil, errors.New("Kd > N is not supported")
 	}
 	return ctx, nil
+}
+
+func (PC *PirContext) Hash() string {
+	buf, _ := json.Marshal(PC)
+	sum := md5.Sum(buf)
+	sumSlice := make([]byte, len(sum))
+	for i := range sum {
+		sumSlice[i] = sum[i]
+	}
+	return hex.EncodeToString(sumSlice)
 }

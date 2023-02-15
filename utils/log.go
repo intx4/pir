@@ -5,18 +5,17 @@ import (
 	"os"
 )
 
+var MAXLEN = 1 * 1024 //1 KB
+
 var Logger = &logrus.Logger{
-	Out:          nil,
-	Hooks:        nil,
-	Formatter:    nil,
-	ReportCaller: false,
-	Level:        logrus.DebugLevel,
-	ExitFunc:     nil,
-	BufferPool:   nil,
+	Out:       os.Stdout,
+	Formatter: new(logrus.TextFormatter),
+	Hooks:     make(logrus.LevelHooks),
+	Level:     logrus.DebugLevel,
 }
 
 func LogInit() {
-	var logFile, err = os.OpenFile(os.ExpandEnv("$HOME/pir/var/log/pir.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	var logFile, err = os.OpenFile(os.Getenv("PIR_LOG"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		panic(err)
 	}

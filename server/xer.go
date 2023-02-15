@@ -1,5 +1,12 @@
 package server
 
+// //BEFORE RUNNING:
+// //export PKG_CONFIG_PATH=/usr/lib/x86_64-linux-gnu/pkgconfig/python3-embed.pc
+// //export PYASN_DIR = dir of pyasn
+// #cgo pkg-config: python3-embed
+// #include <Python.h>
+import "C"
+
 import (
 	"bytes"
 	"context"
@@ -9,6 +16,7 @@ import (
 	"github.com/sirupsen/logrus"
 	"log"
 	"net/http"
+	"os"
 	"pir/utils"
 )
 
@@ -141,11 +149,13 @@ func NewXerServer(addr string, port string, recordChan chan *IEFRecord) (*XerSer
 	if !python3.Py_IsInitialized() {
 		return nil, errors.New("Error initializing Python interpreter")
 	}
-	dir := "/home/intx/GolandProjects/pir/server"
+
 	//dir, err := filepath.Abs(filepath.Dir(os.Args[0]))
+	dir := os.Getenv("PYASN_DIR")
 	ret := python3.PyRun_SimpleString("import sys\nsys.path.append(\"" + dir + "\")")
 	if ret != 0 {
-		return nil, errors.New(fmt.Sprintf("error appending '%s' to python sys.path", dir))
+		python3.PyErr_Print()
+		return nil, errors.New(fmt.Sprintf("error appending PYASN_DIR env variable to python sys.path"))
 	}
 
 	ModuleImport := python3.PyImport_ImportModule("pyasn") //new ref
@@ -182,7 +192,6 @@ func (xs *XerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		buff := make([]byte, r.ContentLength)
 		r.Body.Read(buff)
 		inputBuf := bytes.NewBuffer(buff)
-		log.Println(inputBuf.String())
 		utils.Logger.WithFields(logrus.Fields{"service": "XER", "body": inputBuf.String()}).Info("POST request")
 		inputPyBytes := python3.PyBytes_FromString(inputBuf.String()) //new Ref
 		args := python3.PyTuple_New(1)                                //retval: New reference
@@ -232,7 +241,9 @@ func (xs *XerServer) Start() error {
 		}
 		log.Print("Server Exited Properly")
 	}()
+	utils.Logger.WithFields(logrus.Fields{"service": "XER", "addr": xs.Addr, "port": xs.Port}).Info("Server started")
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		utils.Logger.WithFields(logrus.Fields{"service": "XER", "error": err.Error()}).Info("Error")
 		return err
 	}
 	return nil
