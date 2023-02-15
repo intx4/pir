@@ -1,5 +1,8 @@
 # Enabling Practical Privacy-Preserving Lawful Interception in 5G SA Core with Weakly Private Information Retrieval
-
+## THIS BRANCH
+This branch contains the vanilla implementation of [Sparse-MulPIR](https://eprint.iacr.org/2019/1483) used for testing of the underlying crypto protocol
+and benchmarking.
+In order to use a version for ```P3LI5``` PoC go to ```master``` branch.
 ## DOCUMENTATION
 ```./help.sh``` to spawn documentation on your browser.
 ## ENVIRONMENT VARIABLES

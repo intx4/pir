@@ -4,132 +4,34 @@ Package implementing PIR client
 package client
 
 import (
-	"bytes"
-	"context"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"github.com/sirupsen/logrus"
 	"github.com/tuneinsight/lattigo/v4/bfv"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
-	"google.golang.org/grpc"
-	"log"
 	"math"
 	"math/rand"
-	pb "pir/client/pb"
 	"pir/messages"
 	"pir/server"
 	"pir/settings"
 	"pir/utils"
 	"strconv"
-	"time"
 )
-
-type InternalRequest struct {
-	// Sent from backend to pir logic
-	Key           []byte
-	Expansion     bool
-	WeaklyPrivate bool
-	Leakage       int
-}
-
-type InternalResponse struct {
-	// From client to backend
-	Payload []*server.ICFRecord `json:"payload,omitempty"`
-	Leakage float64             `json:"leakage"`
-	Latency float64             `json:"latency"`
-	Error   error               `json:"error,omitempty"`
-}
-type RequestChannel chan *InternalRequest
-type ResponseChannel chan *InternalResponse
 
 type PIRClient struct {
 	//Defines the client for the PIR protocol
-	Context      *settings.PirContext
-	Pp           map[string]*settings.PIRProfileSet
-	Id           string
-	RequestChan  RequestChannel
-	ResponseChan ResponseChannel
-	GrpcAddrPort string
+	Context *settings.PirContext
+	Pp      map[string]*settings.PIRProfileSet
+	Id      string
 }
 
 // Returns a new PIR Client. Must provide unique id (used at server-side for storing crypto material),
 // grpc address and port of the proxy to forward requests to IQF
 // and channels for internal communication with backend
-func NewPirClient(id string, grpcAddrPort string, requestChan RequestChannel, responseChan ResponseChannel) *PIRClient {
+func NewPirClient(id string) *PIRClient {
 	client := new(PIRClient)
 	client.Id = id
 	client.Pp = make(map[string]*settings.PIRProfileSet)
-	client.RequestChan = requestChan
-	client.ResponseChan = responseChan
-	client.GrpcAddrPort = grpcAddrPort
 	return client
-}
-
-// Starts client: first it fetches the context, then listen for new queries (blocking)
-func (PC *PIRClient) Start() {
-	utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Fetching context")
-	PC.RequireContext()
-	utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Context fetched")
-	PC.ListenForQueries()
-}
-
-// Listen for queries from backend
-func (PC *PIRClient) ListenForQueries() {
-	utils.Logger.WithFields(logrus.Fields{"service": "GRPC"}).Info("Listening for queries...")
-	for true {
-		command := <-PC.RequestChan
-		if profile, ok := PC.Pp[PC.Context.Hash()].P[command.Leakage]; !ok {
-			go func() {
-				PC.ResponseChan <- &InternalResponse{Error: errors.New("Profile not found for leakage setting")}
-			}()
-			continue
-		} else {
-			start := time.Now()
-			request, leakedBits, err := PC.QueryGen(command.Key, profile, command.Leakage, command.WeaklyPrivate, command.Expansion, true)
-			if err != nil {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error generating query")
-				go func(err error) {
-					PC.ResponseChan <- &InternalResponse{Error: err}
-				}(err)
-				continue
-			}
-			answer, err := PC.SendQuery(request, PC.GrpcAddrPort)
-			if err != nil {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
-				go func(err error) {
-					PC.ResponseChan <- &InternalResponse{Error: err}
-				}(err)
-				continue
-			}
-			payload, err := PC.ParseAnswer(answer, profile)
-			if err != nil {
-				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
-				go func(err error) {
-					PC.ResponseChan <- &InternalResponse{Error: err}
-				}(err)
-				continue
-			} else {
-				if payload != nil {
-					records, err := PC.decodeICFRecords(payload)
-					if err != nil {
-						utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error decoding ICF records")
-						go func(err error) {
-							PC.ResponseChan <- &InternalResponse{Error: err}
-						}(err)
-						continue
-					} else {
-						utils.Logger.WithFields(logrus.Fields{"service": "client", "payload": string(payload), "leak": leakedBits}).Info("Answer")
-						end := time.Since(start).Seconds()
-						go func(records []*server.ICFRecord, leakedBits float64, end float64) {
-							PC.ResponseChan <- &InternalResponse{Payload: records, Leakage: leakedBits, Latency: end}
-						}(records, leakedBits/float64(PC.Context.Items), end)
-						continue
-					}
-				}
-			}
-		}
-	}
 }
 
 // Sets new context
@@ -198,25 +100,8 @@ func (PC *PIRClient) ContextReqGen() *messages.PIRQuery {
 		Seed:         0,
 		ClientId:     PC.Id,
 		Profile:      nil,
-		ByGUTI:       false,
 		FetchContext: true,
 	}
-}
-
-// Fetches context from ISP and sets it along new profiles
-func (PC *PIRClient) RequireContext() {
-	request := PC.ContextReqGen()
-	answer, err := PC.SendQuery(request, PC.GrpcAddrPort)
-	if err != nil {
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error fetching context")
-		panic("Error fetching context: " + err.Error())
-	}
-	_, err = PC.ParseAnswer(answer, nil)
-	if err != nil {
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error fetching context")
-		PC.ResponseChan <- &InternalResponse{Error: err}
-	}
-	PC.ResponseChan <- &InternalResponse{}
 }
 
 /*
@@ -418,69 +303,4 @@ func (PC *PIRClient) AnswerGet(profile *settings.PIRProfile, answer []*rlwe.Ciph
 		return nil, err
 	}
 	return value, nil
-}
-
-// Decodes bytes into a series of ICFRecords
-func (PC *PIRClient) decodeICFRecords(payload []byte) ([]*server.ICFRecord, error) {
-	items := bytes.Split(payload, server.ITEMSEPARATOR)
-	records := make([]*server.ICFRecord, len(items))
-	for i := range items {
-		records[i] = new(server.ICFRecord)
-		err := records[i].SuccinctDecode(items[i])
-		if err != nil {
-			return nil, err
-		}
-	}
-	return records, nil
-}
-
-// GRPC
-// |
-// v
-
-// Sends query to ICF via gRPC service in Python. Address is of form "ip:port"-
-// Returns a PIRAnswer to parse and any gRPC or parsing error
-func (PC *PIRClient) SendQuery(query *messages.PIRQuery, address string) (*messages.PIRAnswer, error) {
-	conn, err := grpc.Dial(address, grpc.WithInsecure(), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(200*1024*1024), grpc.MaxCallSendMsgSize(200*1024*1024)))
-	if err != nil {
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Connection error")
-		log.Println(err)
-		return nil, err
-	}
-	defer conn.Close()
-
-	client := pb.NewProxyClient(conn)
-	data, err := json.Marshal(query)
-	if err != nil {
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Json Encode Error")
-		return nil, err
-	}
-	req := pb.QueryMessage{
-		Query: base64.StdEncoding.EncodeToString(data),
-	}
-	utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "addr": address, "data": base64.StdEncoding.EncodeToString(data)[:int(utils.Min(float64(utils.MAXLEN), float64(len(base64.StdEncoding.EncodeToString(data)))))]}).Debug("Sending GRPC Query")
-	resp, err := client.Query(context.Background(), &req)
-	if err != nil {
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error")
-		return nil, err
-	}
-	utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "response": logrus.Fields{"answer": resp.GetAnswer()[:int(utils.Min(float64(utils.MAXLEN), float64(len(resp.GetAnswer()))))], "error": resp.GetError()}}).Info("Received GRPC Response")
-	if resp.GetError() == "" {
-		answerDec, err := base64.StdEncoding.DecodeString(resp.GetAnswer())
-		if err != nil {
-			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("B64 decode Error")
-			return nil, err
-		}
-		pirAnswer := &messages.PIRAnswer{}
-		err = json.Unmarshal(answerDec, pirAnswer)
-		if err != nil {
-			log.Println(err)
-			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Json Decode Error")
-			return nil, err
-		}
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "ok": pirAnswer.Ok, "error": pirAnswer.Error, "fetch-context": pirAnswer.FetchContext}).Info("Answer")
-		return pirAnswer, err
-	} else {
-		return nil, errors.New("gRPC Answer Message: error= " + resp.GetError())
-	}
 }

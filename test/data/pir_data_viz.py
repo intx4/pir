@@ -5,7 +5,7 @@ from numpy import log2
 from dataclasses import dataclass
 import pandas as pd
 
-fieldnames = ['entries', 'size', 'ecd_time', 'ecd_size', 'query_gen_time', 'answer_gen_time', 'answer_get_time', "tot_time", 'query_size', 'answer_size']
+fieldnames = ["entries", "size", "dimentions", "LogN", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "leakedBits", "informationBits"]
 
 class RecordsOfInstance:
     """
