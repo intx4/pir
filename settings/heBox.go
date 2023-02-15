@@ -1,3 +1,4 @@
+// Package defines types and methods for setting up PIR protocol (e.g parameters, context)
 package settings
 
 import (

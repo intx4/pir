@@ -1,3 +1,4 @@
+// Main PIR application
 package main
 
 import (

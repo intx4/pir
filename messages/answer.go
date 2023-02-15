@@ -1,6 +1,5 @@
+// Defines messages and related methods for WPIR protocol
 package messages
-
-//Defines messages and related methods for WPIR protocol
 
 import (
 	"github.com/tuneinsight/lattigo/v4/rlwe"

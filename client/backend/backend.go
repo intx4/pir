@@ -1,6 +1,6 @@
+// Implements the backend server needed to interact with the web gui
 package backend
 
-//Implements the backend server needed to interact with the web gui
 import (
 	"encoding/json"
 	"fmt"

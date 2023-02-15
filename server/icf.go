@@ -1,3 +1,4 @@
+// Package implements the server side for PIR
 package server
 
 import (

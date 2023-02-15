@@ -1,3 +1,4 @@
+// Package implements unit test for testing functionalities and benchmarking. Disclaimer: test suite has not full coverage
 package test
 
 import (

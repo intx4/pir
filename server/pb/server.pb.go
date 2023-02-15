@@ -4,6 +4,7 @@
 // 	protoc        v3.6.1
 // source: server/pb/server.proto
 
+// Package contains GRPC Go binding
 package pb
 
 import (

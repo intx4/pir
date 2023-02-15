@@ -1,5 +1,7 @@
 # Enabling Practical Privacy-Preserving Lawful Interception in 5G SA Core with Weakly Private Information Retrieval
 
+## DOCUMENTATION
+```./help.sh``` to spawn documentation on your browser.
 ## ENVIRONMENT VARIABLES
 Before running, set the following:
 ```

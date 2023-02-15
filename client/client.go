@@ -1,3 +1,6 @@
+/*
+Package implementing PIR client
+*/
 package client
 
 import (
