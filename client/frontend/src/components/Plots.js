@@ -3,25 +3,27 @@ import {XYPlot, XAxis, YAxis, VerticalBarSeries, Label, HorizontalBarSeries, Hor
 import Container from "react-bootstrap/Container";
 import Row from "react-bootstrap/Row";
 import Col from "react-bootstrap/Col";
+
+const MAXBARS = 10;
 function LeakageChart(props) {
     let data = [...props.data];
     let i = 1;
-    while (data.length < 5){
+    while (data.length < MAXBARS){
         data.push({timestamp:" ".repeat(i), leakage:0});
         i += 1;
     }
-    if (data.length > 5){
-        data = data.slice(-5);
+    if (data.length > MAXBARS){
+        data = data.slice(-MAXBARS);
     }
     return (
         <XYPlot
             style={{ background: "#000", color: "#fff" }}
             xType="ordinal"
             width={data.length * 100}
-            height={200}
+            height={230}
             yDomain={[0, Math.max(...data.map(v => v.leakage*100))]}
         >
-            <VerticalBarSeries barWidth={0.8}  data={data.map(v => ({x: v.timestamp, y: v.leakage*100}))} fill="yellow" color="yellow"/>
+            <VerticalBarSeries barWidth={0.75} spacing={0.2}  data={data.map(v => ({x: v.timestamp, y: v.leakage*100}))} fill="yellow" color="yellow"/>
             <XAxis style={{ text: {stroke: 'none', fill: 'yellow', fontWeight: 600}}}  position="start" />
             <YAxis style={{ text: {stroke: 'none', fill: 'yellow', fontWeight: 600}}}
             />
@@ -32,24 +34,24 @@ function LeakageChart(props) {
 function LatencyChart(props) {
     let data = [...props.data];
     let i = 1;
-    while (data.length < 5){
+    while (data.length < MAXBARS){
         data.push({timestamp:" ".repeat(i), latency:0});
         i += 1;
     }
-    if (data.length > 5){
-        data = data.slice(-5);
+    if (data.length > MAXBARS){
+        data = data.slice(-MAXBARS);
     }
     return (
         <XYPlot
             style={{ background: "#000", color: "#fff" }}
             xType="ordinal"
             width={data.length * 100}
-            height={200}
+            height={230}
             yDomain={[0, Math.max(...data.map(v => v.latency))]}
         >
             <VerticalGridLines />
             <HorizontalGridLines />
-            <VerticalBarSeries barWidth={0.8}  data={data.map(v => ({x: v.timestamp, y: v.latency}))} fill="orange" color="orange"/>
+            <VerticalBarSeries barWidth={0.75} spacing={0.2} data={data.map(v => ({x: v.timestamp, y: v.latency}))} fill="orange" color="orange"/>
             <XAxis style={{ text: {stroke: 'none', fill: 'orange', fontWeight: 600}}} position="start" />
             <YAxis style={{ text: {stroke: 'none', fill: 'orange', fontWeight: 600}}} />
         </XYPlot>
