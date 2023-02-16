@@ -3,7 +3,7 @@
 ## THIS BRANCH
 This branch contains an implementation of [Sparse-MulPIR](https://eprint.iacr.org/2019/1483) used for private Lawful Interception PoC in 5G Core.
 The code is used in deployment inside a Docker container and is part of the ```P3LI5``` project:
-- [dockerized open5gs](https://github.com/intx4/P3LI5)
+- [P3LI5](https://github.com/intx4/P3LI5)
 - [minimal PoC for Private LI infrastructure in Python: pyli5](https://github.com/intx4/pyli5)
 
 A standalone implementation can be found in the ```vanilla``` branch, which is just provides implementation of PIR client and server for generic applications. It also provides a test-suite for benchmarking.
@@ -22,7 +22,8 @@ export PIR_LOG=<path_to>/pir/var/log/pir.log
 ```
 
 ## GRPC
-
+We already provide the Go bindings for GRPC.
+This is how they were generated (for reference):
 ### Go
 
 -   Install protoc:
