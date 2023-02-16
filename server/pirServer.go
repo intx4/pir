@@ -26,11 +26,6 @@ var DEFAULTN = 1 << 13
 
 var ITEMSEPARATOR = []byte("|")
 
-// Interface for an abstract storage
-type Storage interface {
-	Load(key interface{}) (interface{}, bool)
-}
-
 // Entry of PIRStorage struct
 // Leverages concurrent access of sync.Map while deferring atomicity to internal lock
 // Used during computation
@@ -44,24 +39,6 @@ func NewPirEntry() *PIREntry {
 		Mux: new(sync.RWMutex),
 		Ops: make([]rlwe.Operand, 0),
 	}
-}
-
-// PIRStorage is used during computation.
-// Supports concurrent lookups while atomicity is defered to single entry level
-// PIRStorage and PIREntry are in contrast with PIRDBStorage and PIRDBEntry which are instead used only for storing
-type PIRStorage struct {
-	Map *sync.Map `json:"map,omitempty"` //string -> PIREntry
-}
-
-func NewPirStorage() *PIRStorage {
-	storage := new(PIRStorage)
-	storage.Map = new(sync.Map)
-	return storage
-}
-
-func (S *PIRStorage) Load(key interface{}) (interface{}, bool) {
-	v, ok := S.Map.Load(key.(string))
-	return v, ok
 }
 
 // This interface represents one element contained in the PIRDBEntry (e.g an ICFRecord)
@@ -225,45 +202,6 @@ func (S *PIRDBStorage) encode() {
 	wg.Wait()
 	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "context": S.Context}).Info("Encoded DB")
 	S.Db = ecdStorage
-}
-
-// Deprecated, you should instead use the encode method of each entry
-func (S *PIRDBStorage) EncodeRLWE(params bfv.Parameters) *PIRStorage {
-	S.Mux.Unlock()
-	defer S.Mux.Unlock()
-	ctx := S.Context
-	ecd := bfv.NewEncoder(params)
-	_, Kd, dimentions := ctx.K, ctx.Kd, ctx.Dim
-
-	ecdStorage := new(sync.Map)
-	var wg sync.WaitGroup
-	pool := runtime.NumCPU()
-	poolCh := make(chan struct{}, pool)
-	//errCh := make(chan error)
-	//init pool chan
-	for i := 0; i < pool; i++ {
-		poolCh <- struct{}{}
-	}
-	S.Db.Range(func(key, value any) bool {
-		k, _ := utils.MapKeyToDim([]byte(key.(string)), Kd, dimentions)
-		<-poolCh
-		wg.Add(1)
-		go func(key string, value *PIRDBEntry) {
-			defer wg.Done()
-			ops, err := value.EncodeRLWE(settings.TUsableBits, ecd.ShallowCopy(), params)
-			entry := NewPirEntry()
-			entry.Ops = ops
-			ecdStorage.Store(key, entry)
-			if err != nil {
-				panic(err)
-			}
-			ecdStorage.Store(k, NewPirEntry())
-			poolCh <- struct{}{}
-		}(k, value.(*PIRDBEntry))
-		return true
-	})
-	wg.Wait()
-	return &PIRStorage{Map: ecdStorage}
 }
 
 func (S *PIRDBStorage) Add(event *IEFRecord) {
@@ -510,7 +448,7 @@ func (S *PIRDBStorage) processPIRQuery(queryRecvd *messages.PIRQuery, box *setti
 type multiplierTask struct {
 	Query      *rlwe.Ciphertext
 	Values     interface{} //from db
-	ResultMap  *PIRStorage //map to save result of query x values
+	ResultMap  *sync.Map   //map to save result of query x values
 	ResultKey  string      //key of result map
 	FeedBackCh chan int    //flag completion of one mul to caller
 }
@@ -528,8 +466,7 @@ The query can be represented as:
     the selection. The resulting bucket is returned to the client which can decrypt the answer and retrieve the value
 */
 func (S *PIRDBStorage) answerGen(box *settings.HeBox, prefix string, query [][]*rlwe.Ciphertext) ([]*rlwe.Ciphertext, error) {
-	var ecdStore Storage
-	ecdStore = S
+	ecdStore := S.Db
 	Kd, Dimentions := S.Context.Kd, S.Context.Dim
 	evt := bfv.NewEvaluator(box.Params, rlwe.EvaluationKey{Rlk: box.Rlk})
 	ecd := bfv.NewEncoder(box.Params)
@@ -593,7 +530,7 @@ func (S *PIRDBStorage) answerGen(box *settings.HeBox, prefix string, query [][]*
 		//fmt.Println("dimention ", d+1)
 		q := query[d]
 
-		nextStore := NewPirStorage()
+		nextStore := new(sync.Map)
 		//builds access to storage in a recursive way
 		keys := make([]string, 0)
 		utils.GenKeysAtDepth("", d+skippedDims+1, Dimentions, Kd, &keys)
@@ -637,8 +574,8 @@ func (S *PIRDBStorage) answerGen(box *settings.HeBox, prefix string, query [][]*
 			return nil, err
 		}
 		//relin and modswitch + recursively update storage
-		ecdStore = NewPirStorage() //we transform ecdStore into a PIRStorage after first iter to reduce memory
-		nextStore.Map.Range(func(key, value any) bool {
+		ecdStore = new(sync.Map)
+		nextStore.Range(func(key, value any) bool {
 			for _, ct := range value.(*PIREntry).Ops {
 				if d != 0 && ct.Degree() > 1 {
 					//after first we have done a ct x pt -> deg is still 1
@@ -652,7 +589,7 @@ func (S *PIRDBStorage) answerGen(box *settings.HeBox, prefix string, query [][]*
 				}
 			}
 			if !finalRound {
-				ecdStore.(*PIRStorage).Map.Store(key, &PIREntry{
+				ecdStore.Store(key, &PIREntry{
 					Mux: new(sync.RWMutex),
 					Ops: value.(*PIREntry).Ops,
 				})
@@ -702,7 +639,7 @@ func spawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 			intermediateResult = append(intermediateResult, el)
 		}
 		//compress (accumulate result with lazy modswitch and relin) atomically
-		if result, loaded := task.ResultMap.Map.LoadOrStore(
+		if result, loaded := task.ResultMap.LoadOrStore(
 			task.ResultKey, &PIREntry{Mux: new(sync.RWMutex), Ops: intermediateResult}); loaded {
 			result.(*PIREntry).Mux.Lock()
 			for i := 0; i < int(utils.Min(float64(len(intermediateResult)), float64(len(result.(*PIREntry).Ops)))); i++ {
