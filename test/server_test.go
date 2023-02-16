@@ -32,39 +32,37 @@ func TestServerEncode(t *testing.T) {
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
 					_, params := settings.GetsParamForPIR(logN, dimentions, false, false, messages.NONELEAKAGE)
-					server := Server.NewPirServerBenchmark()
-					//let's verify that values are encoded as expected
 					ctx, err := settings.NewPirContext(item, size, 1<<params.LogN(), dimentions)
+					server, _ := Server.NewPirServer(ctx, db)
+					//let's verify that values are encoded as expected
+
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
 					box, _ := settings.NewHeBox(params)
-					if ecdStore, err := server.EncodeBenchmark(ctx, db); err != nil {
-						t.Fatalf(err.Error())
-					} else {
-						ecdStorageAsMap := make(map[string][]rlwe.Operand)
-						ecdStore.Range(func(key, value any) bool {
-							ecdStorageAsMap[key.(string)], _ = value.(*Server.PIREntryBenchmark).EncodeRLWE(settings.TUsableBits, box.Ecd.ShallowCopy(), params)
-							return true
-						})
-						for k, v := range ecdStorageAsMap {
-							entryFromDb, _ := ecdStore.Load(k)
-							expected := entryFromDb.(*Server.PIREntryBenchmark).Coalesce()
-							actual := box.Ecd.DecodeUintNew(v[0].(*bfv.PlaintextMul))
-							for i := 1; i < len(v); i++ {
-								actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)
-							}
-							actualBytes, err := utils.Unchunkify(actual, settings.TUsableBits)
-							if err != nil {
-								t.Fatalf(err.Error())
-							}
-							if len(actualBytes) != len(expected) {
-								t.Fatalf("Len of decoded value is not same as original")
-							}
-							for i := range expected {
-								if actualBytes[i] != expected[i] {
-									t.Fatalf("Decoded value does not match original")
-								}
+					ecdStore := server.Store
+					ecdStorageAsMap := make(map[string][]rlwe.Operand)
+					ecdStore.Range(func(key, value any) bool {
+						ecdStorageAsMap[key.(string)], _ = value.(*Server.PIRDBEntry).EncodeRLWE(settings.TUsableBits, box.Ecd.ShallowCopy(), params)
+						return true
+					})
+					for k, v := range ecdStorageAsMap {
+						entryFromDb, _ := ecdStore.Load(k)
+						expected := entryFromDb.(*Server.PIRDBEntry).Coalesce()
+						actual := box.Ecd.DecodeUintNew(v[0].(*bfv.PlaintextMul))
+						for i := 1; i < len(v); i++ {
+							actual = append(actual, box.Ecd.DecodeUintNew(v[i])...)
+						}
+						actualBytes, err := utils.Unchunkify(actual, settings.TUsableBits)
+						if err != nil {
+							t.Fatalf(err.Error())
+						}
+						if len(actualBytes) != len(expected) {
+							t.Fatalf("Len of decoded value is not same as original")
+						}
+						for i := range expected {
+							if actualBytes[i] != expected[i] {
+								t.Fatalf("Decoded value does not match original")
 							}
 						}
 					}
