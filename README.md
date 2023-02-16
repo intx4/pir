@@ -1,6 +1,6 @@
 # Enabling Practical Privacy-Preserving Lawful Interception in 5G SA Core with Lattice-Based Weakly Private Information Retrieval
 
-# THIS BRANCH
+## THIS BRANCH
 This branch contains an implementation of [Sparse-MulPIR](https://eprint.iacr.org/2019/1483) used for private Lawful Interception PoC in 5G Core.
 The code is used in deployment inside a Docker container and is part of the ```P3LI5``` project:
 - [dockerized open5gs](https://github.com/intx4/docker_open5gs)
@@ -8,6 +8,9 @@ The code is used in deployment inside a Docker container and is part of the ```P
 
 A standalone implementation can be found in the ```vanilla``` branch, which is just provides implementation of PIR client and server for generic applications. It also provides a test-suite for benchmarking.
 
+### RUNNING
+run ```pir --help``` to see how to use the binary. **DISCLAIMER: the binary relies on some configuration parameters and environment variables
+which are normally set automatically during Docker deployment. Please look at [dockerized open5gs](https://github.com/intx4/docker_open5gs) ```/lea``` and ```/icf``` and related DockerFile for more information.**
 ## DOCUMENTATION
 ```./help.sh``` to spawn documentation on your browser.
 ## ENVIRONMENT VARIABLES
