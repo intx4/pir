@@ -1,7 +1,7 @@
 # Dependencies
 ``` npm install --save react-use-websocket@3.0.0```
-
 ``` npm install react-vis --save```
+
 # Deployment
 
 ### `npm install`
