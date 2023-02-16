@@ -1,8 +1,10 @@
-# Enabling Practical Privacy-Preserving Lawful Interception in 5G SA Core with Weakly Private Information Retrieval
+# Partition based Weakly Private Information Retrieval based on Sparse-MulPIR
 ## THIS BRANCH
-This branch contains the vanilla implementation of [Sparse-MulPIR](https://eprint.iacr.org/2019/1483) used for testing of the underlying crypto protocol
-and benchmarking.
-In order to use a version for ```P3LI5``` PoC go to ```master``` branch.
+This branch contains the vanilla implementation of a WPIR scheme based on [Sparse-MulPIR](https://eprint.iacr.org/2019/1483) used for testing of the underlying crypto protocol
+and benchmarking. This branch implements a generic PIR client and server that can be used for testing and/or can be further modify to suite new use-cases.
+We also provide an application of this PIR implementation for Practical and Private Lawful Interception in 5G core as part of the ```P3LI5``` project in the ```master``` branch.
+### RUNNING
+A test-suite is available in ```/test``` for testing the protocol (no network communication involved) in ```client_test.go```.
 ## DOCUMENTATION
 ```./help.sh``` to spawn documentation on your browser.
 ## ENVIRONMENT VARIABLES
