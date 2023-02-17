@@ -69,7 +69,7 @@ func main() {
 		requestChan := make(pclient.RequestChannel)
 		responseChan := make(pclient.ResponseChannel)
 		client := pclient.NewPirClient(conf.Id, "127.0.0.1"+":"+conf.GrpcPort, requestChan, responseChan)
-		backend := backend.NewBackend(conf.Ip, conf.InterceptionPort, requestChan, responseChan, true)
+		backend := backend.NewBackend(conf.Ip, conf.InterceptionPort, requestChan, responseChan)
 		fmt.Println("Attempting connection to ISP...")
 		go client.Start()
 		msg := <-client.ResponseChan
