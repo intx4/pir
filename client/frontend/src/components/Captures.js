@@ -28,6 +28,11 @@ export default function CapturesComp (props) {
     console.log(items);
     console.log("Loading for captures");
     console.log(props.loadingCaptures)
+    if (props.isResolvingAll === true && Array.from(props.loadingCaptures.map(([key, value]) => ({
+            key,
+        })).length === 0)){
+        props.setIsResolvingAll(false);
+    }
     return (
         <Container fluid={true}>
             <Row>
