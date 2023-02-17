@@ -46,7 +46,7 @@ function LatencyChart(props) {
             style={{ background: "#000", color: "#fff" }}
             xType="ordinal"
             width={data.length * 100}
-            height={230}
+            height={200}
             yDomain={[0, Math.max(...data.map(v => v.latency))]}
         >
             <VerticalGridLines />
