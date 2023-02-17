@@ -39,8 +39,9 @@ type Capture struct {
 }
 
 type ResolveRequest struct {
-	Id      int `json:"id"`
-	Leakage int `json:"leakage"`
+	Id      int    `json:"id"`
+	Type    string `json:"type"`
+	Leakage int    `json:"leakage"`
 }
 
 type Association struct {
@@ -73,12 +74,11 @@ type BackEndServer struct {
 	ResponseChan     client.ResponseChannel  //from PIR logic
 	Ip               string
 	Port             string
-	queryBySuci      bool
 }
 
 var upgrader = websocket.Upgrader{} // use default options
 
-func NewBackend(Ip string, Port string, reqCh client.RequestChannel, resCh client.ResponseChannel, queryBySuci bool) *BackEndServer {
+func NewBackend(Ip string, Port string, reqCh client.RequestChannel, resCh client.ResponseChannel) *BackEndServer {
 	return &BackEndServer{
 		currentId:        1,
 		cLock:            new(sync.RWMutex),
@@ -90,7 +90,6 @@ func NewBackend(Ip string, Port string, reqCh client.RequestChannel, resCh clien
 		ResponseChan:     resCh,
 		Ip:               Ip,
 		Port:             Port,
-		queryBySuci:      queryBySuci,
 	}
 }
 
@@ -110,7 +109,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 			stored := false
 			record := new(Association)
 			record = nil //make a nil pointer to association
-			if BE.queryBySuci {
+			if resolveRequest.Type == TYPESUCI {
 				if record, stored = BE.associationCache[item.Suci]; stored {
 					utils.Logger.WithFields(logrus.Fields{"service": "Backend", "record": (&server.ICFRecord{
 						Supi:          record.Supi,
@@ -158,7 +157,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 					found := false
 					for _, r := range response.Payload {
 						utils.Logger.WithFields(logrus.Fields{"Association": r.String()}).Info("New Association Record")
-						if BE.queryBySuci {
+						if resolveRequest.Type == TYPESUCI {
 							if r.Suci == item.Suci {
 								found = true
 								record = &Association{
@@ -213,7 +212,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 						}
 					}
 					if !found {
-						if BE.queryBySuci {
+						if resolveRequest.Type == TYPESUCI {
 							utils.Logger.WithFields(logrus.Fields{"SUCI": item.Suci}).Warn("Association Record Not Found")
 							BE.conn.WriteJSON(&Association{
 								Type:  TYPEASSOCIATION,
@@ -291,7 +290,13 @@ func (BE *BackEndServer) syncFrontend() {
 		time.Sleep(100 * time.Millisecond)
 	}
 	for _, association := range BE.associations {
-		BE.conn.WriteJSON(association)
+		cleanRecord := new(Association)
+		//cleanup end time
+		*cleanRecord = *association
+		if cleanRecord.EndTimestamp == "" {
+			cleanRecord.EndTimestamp = "Still valid"
+		}
+		BE.conn.WriteJSON(cleanRecord)
 		time.Sleep(100 * time.Millisecond)
 	}
 }

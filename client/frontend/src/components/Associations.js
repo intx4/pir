@@ -17,7 +17,7 @@ export default function AssociationsComp (props) {
             <Row>
                 <Col md={2} xl={2} lg={2}><h2>SUPI</h2></Col>
                 <Col md={2} xl={2} lg={2}><h2>SUCI</h2></Col>
-                <Col md={2} xl={2} lg={2}><h2>GUTI</h2></Col>
+                <Col md={2} xl={2} lg={2}><h2>TMSI</h2></Col>
                 <Col ><h2>Start-Time</h2></Col>
                 <Col ><h2>End-Time</h2></Col>
             </Row>

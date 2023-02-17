@@ -8,7 +8,6 @@ import {Event, Captures} from "./Events";
 export default function CapturesComp (props) {
     function handleButtonClick(){
         if (props.isResolvingAll === false) {
-            props.setIsResolvingAll(true);
             props.setResolveAll(true);
         }
         props.setResolveModalShow(true);
@@ -39,7 +38,7 @@ export default function CapturesComp (props) {
             </Row>
             <Row className={"border-white"}>
                 <Col ><h2>SUCI</h2></Col>
-                <Col ><h2>GUTI</h2></Col>
+                <Col ><h2>TMSI</h2></Col>
                 <Col><h2>Time</h2></Col>
             </Row>
             <div style={{

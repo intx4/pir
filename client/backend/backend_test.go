@@ -18,7 +18,7 @@ import (
 func TestBackend(t *testing.T) {
 	reqCh := make(client.RequestChannel)
 	resCh := make(client.ResponseChannel)
-	be := NewBackend("127.0.0.1", "8484", reqCh, resCh, true)
+	be := NewBackend("127.0.0.1", "8484", reqCh, resCh)
 	errCh := make(chan error)
 	go be.Start(errCh)
 	//wait 1 seconds for errors, if no continue

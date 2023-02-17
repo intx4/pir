@@ -198,7 +198,6 @@ func (PC *PIRClient) ContextReqGen() *messages.PIRQuery {
 		Seed:         0,
 		ClientId:     PC.Id,
 		Profile:      nil,
-		ByGUTI:       false,
 		FetchContext: true,
 	}
 }

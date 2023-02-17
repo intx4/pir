@@ -41,6 +41,7 @@ function ResolveModal(props){
     </Modal>)
   }
   if (props.isResolvingAll === true && props.resolveAll === false){
+    //already got the prompt to resolve all
     return (
         <Modal show={props.show} onHide={()=> {
           props.setLeakage(0);
@@ -60,8 +61,16 @@ function ResolveModal(props){
                   <RangeSlider value={props.leakage} variant="warning" step={1} min={0} max={2} onChange={(e)=>props.setLeakage(e.target.value)}></RangeSlider>
                 </Col>
                 <Col>
+                  <Form.Check
+                    type="switch"
+                    label="Resolve by SUCI"
+                    variant={"warning"}
+                    checked={props.bySUCI}
+                    onChange={e => props.setBySUCI(e.target.checked)}
+                /></Col>
+                <Col>
                   <Button variant="success" onClick={() => {
-                    props.setShow(false);}}>CONFIRM</Button>
+                    props.setShow(false);}}>Confirm</Button>
                 </Col>
               </Row>
             </Container>
@@ -82,7 +91,7 @@ function ResolveModal(props){
           : props.items.has(props.id) === true ? (<Container>
                   <Row>
                     <Col>SUCI</Col>
-                    <Col>GUTI</Col>
+                    <Col>TMSI</Col>
                     <Col>Timestamp</Col>
                   </Row>
                   <Row>
@@ -100,6 +109,13 @@ function ResolveModal(props){
                 <Form.Label>Leakage</Form.Label>
                 <RangeSlider value={props.leakage} variant="warning" step={1} min={0} max={2} onChange={(e)=>props.setLeakage(e.target.value)}></RangeSlider>
               </Col>
+              <Col><Form.Check
+                  type="switch"
+                  label="Resolve by SUCI"
+                  variant={"warning"}
+                  checked={props.bySUCI}
+                  onChange={e => props.setBySUCI(e.target.checked)}
+              /></Col>
               <Col>
                 <Button variant="danger" onClick={() => {
                   props.handleResolve(); //will set resolveAll to false
@@ -122,6 +138,7 @@ export default function Home(props) {
   const [resolveModalShow, setResolveModelShow] = useState(false);
   const [clickedCaptureId, setClickedCaptureId] = useState(-1);
   const [leakage, setLeakage] = useState(0);
+  const [bySUCI, setBySUCI] = useState(false); //resolve by SUCI or guti
   const [resolveAll, setResolveAll] = useState(false);
   const [isResolvingAll, setIsResolvingAll] = useState(false);
   const ws = useRef(null); //on .current change, ws will still be treated as same object not triggering re-render
@@ -161,12 +178,15 @@ export default function Home(props) {
           setCaptures(prevCaptures => {let newCaptures = new Map(prevCaptures); newCaptures.delete(association.id); return newCaptures});
         }
         if (loadingCaptures.has(association.id)) {
-          setLoadingCaptures(prevCaptures => {let newCaptures = new Map(prevCaptures); newCaptures.delete(association.id); return newCaptures});
-        }
-        if (Array.from(loadingCaptures).map(([key, value]) => ({
-          key,
-        })).length === 0){
-          setIsResolvingAll(false);
+          setLoadingCaptures(prevCaptures => {
+            let newCaptures = new Map(prevCaptures);
+            newCaptures.delete(association.id);
+            if (Array.from(loadingCaptures).map(([key, value]) => ({
+              key,
+            })).length === 0){
+              setIsResolvingAll(false);
+            }
+            return newCaptures});
         }
         setAssociations(prevAssociations => new Map(prevAssociations).set(association.id, association));
         const currentTime = new Date();
@@ -222,6 +242,7 @@ export default function Home(props) {
     console.log("Resolve");
     let ids = [];
     if (resolveAll === true) {
+      setIsResolvingAll(true);
       Array.from(captures).map(([key, value]) => {
         ids.push(key)
       });
@@ -245,7 +266,8 @@ export default function Home(props) {
     for (const id of ids) {
       let obj = {
         id: parseInt(id),
-        leakage: parseInt(leakage)
+        leakage: parseInt(leakage),
+        type: bySUCI === true ? "SUCI" : "TMSI"
       };
       console.log("Resolve request")
       console.log(obj)
@@ -263,6 +285,7 @@ export default function Home(props) {
       <div className="Dashboard">
       <ResolveModal show={resolveModalShow} setShow={setResolveModelShow}
                     leakage={leakage} setLeakage={setLeakage}
+                    bySUCI={bySUCI} setBySUCI={setBySUCI}
                     items={captures}
                     loadingItems={loadingCaptures} setLoadingItems={setLoadingCaptures}
                     id={clickedCaptureId}

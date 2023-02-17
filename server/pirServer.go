@@ -142,21 +142,19 @@ func (PE *PIRDBEntry) EncodeRLWE(t int, ecd bfv.Encoder, params bfv.Parameters) 
 
 // Main DB Struct for storing data and caching
 type PIRDBStorage struct {
-	Mux           *sync.RWMutex //global lock: the philosophy is to allow selectively global atomic operations and concurrent access to the map
-	Db            *sync.Map     //string -> PIRDBEntry
-	Context       *settings.PirContext
-	EncodedBySUCI bool //GUTI false or SUCI true
-	Items         int  //actual number of items
+	Mux     *sync.RWMutex //global lock: the philosophy is to allow selectively global atomic operations and concurrent access to the map
+	Db      *sync.Map     //string -> PIRDBEntry
+	Context *settings.PirContext
+	Items   int //actual number of items
 }
 
-func NewPirDBStorage(encodedBySUCI bool) (*PIRDBStorage, error) {
+func NewPirDBStorage() (*PIRDBStorage, error) {
 	ctx, err := settings.NewPirContext(DEFAULTSTARTITEMS, DEFAULTSIZE, DEFAULTN, DEFAULTDIMS)
 	return &PIRDBStorage{
-		Mux:           new(sync.RWMutex),
-		Db:            new(sync.Map),
-		EncodedBySUCI: encodedBySUCI,
-		Items:         0,
-		Context:       ctx,
+		Mux:     new(sync.RWMutex),
+		Db:      new(sync.Map),
+		Items:   0,
+		Context: ctx,
 	}, err
 }
 
@@ -207,39 +205,42 @@ func (S *PIRDBStorage) encode() {
 func (S *PIRDBStorage) Add(event *IEFRecord) {
 	S.Mux.Lock() //needed to avoid insert during re-encoding
 	defer S.Mux.Unlock()
-	key, _ := "", []int{}
 	suci, guti := "", ""
-	if S.EncodedBySUCI {
-		if event.Assoc != nil {
-			suci = event.Assoc.Suci
-		} else if event.DeAssoc != nil {
-			suci = event.DeAssoc.Suci
-		}
-		key, _ = utils.MapKeyToDim([]byte(suci), S.Context.Kd, S.Context.Dim)
-	} else {
-		//GUTI
-		if event.Assoc != nil {
-			guti = event.Assoc.FiveGGUTI
-		} else if event.DeAssoc != nil {
-			guti = event.DeAssoc.FiveGGUTI
-		}
-		key, _ = utils.MapKeyToDim([]byte(guti), S.Context.Kd, S.Context.Dim)
+	keyS, keyG := "", ""
+
+	if event.Assoc != nil {
+		suci = event.Assoc.Suci
+	} else if event.DeAssoc != nil {
+		suci = event.DeAssoc.Suci
 	}
-	if v, loaded := S.Db.Load(key); !loaded { //no nead for LoadOrStore as cache insertion is atomic
-		if S.EncodedBySUCI {
-			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": key}).Info("Registering event in new entry in DB")
-		} else {
-			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": key}).Info("Registering event in new entry in DB")
-		}
+	if suci != "" {
+		keyS, _ = utils.MapKeyToDim([]byte(suci), S.Context.Kd, S.Context.Dim)
+	}
+	//GUTI
+	if event.Assoc != nil {
+		guti = event.Assoc.FiveGGUTI
+	} else if event.DeAssoc != nil {
+		guti = event.DeAssoc.FiveGGUTI
+	}
+	if guti != "" {
+		keyG, _ = utils.MapKeyToDim([]byte(guti), S.Context.Kd, S.Context.Dim)
+	}
+	if v, loaded := S.Db.Load(keyS); !loaded { //no nead for LoadOrStore as cache insertion is atomic
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": keyS}).Info("Registering event in new entry in DB")
 		v = NewPirDBEntry()
 		S.Items += v.(*PIRDBEntry).AddValue(event)
-		S.Db.Store(key, v)
+		S.Db.Store(keyS, v)
 	} else {
-		if S.EncodedBySUCI {
-			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": key}).Info("Adding event in entry in DB")
-		} else {
-			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": key}).Info("Adding event in entry in DB")
-		}
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": keyS}).Info("Adding event in entry in DB")
+		S.Items += v.(*PIRDBEntry).AddValue(event)
+	}
+	if v, loaded := S.Db.Load(keyG); !loaded { //no nead for LoadOrStore as cache insertion is atomic
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": keyG}).Info("Registering event in new entry in DB")
+		v = NewPirDBEntry()
+		S.Items += v.(*PIRDBEntry).AddValue(event)
+		S.Db.Store(keyG, v)
+	} else {
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": keyG}).Info("Adding event in entry in DB")
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 	}
 	S.checkContext()
@@ -254,7 +255,7 @@ type PIRServer struct {
 func NewPirServer(recordChan chan *IEFRecord) (*PIRServer, error) {
 	PS := new(PIRServer)
 	var err error
-	PS.Storage, err = NewPirDBStorage(true)
+	PS.Storage, err = NewPirDBStorage()
 	PS.Profiles = make(map[string]map[string]*settings.PIRProfileSet)
 	PS.RecordChan = recordChan
 	return PS, err
@@ -285,7 +286,7 @@ func (S *PIRDBStorage) checkContext() {
 		}
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to bigger DB representation")
 		S.encode()
-	} else if S.Items >= 3*S.Items {
+	} else if S.Context.Items >= 2*S.Items {
 		S.Context, err = settings.NewPirContext(S.Items*2, DEFAULTSIZE, DEFAULTN, DEFAULTDIMS)
 		if err != nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Info("Error while shrinking DB")
