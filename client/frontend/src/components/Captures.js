@@ -28,9 +28,9 @@ export default function CapturesComp (props) {
     console.log(items);
     console.log("Loading for captures");
     console.log(props.loadingCaptures)
-    if (props.isResolvingAll === true && Array.from(props.loadingCaptures.map(([key, value]) => ({
+    if (props.isResolvingAll === true && Array.from(props.loadingCaptures).map(([key, value]) => ({
             key,
-        })).length === 0)){
+        })).length === 0){
         props.setIsResolvingAll(false);
     }
     return (

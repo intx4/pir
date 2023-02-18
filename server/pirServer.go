@@ -227,20 +227,24 @@ func (S *PIRDBStorage) Add(event *IEFRecord) {
 	}
 	if v, loaded := S.Db.Load(keyS); !loaded { //no nead for LoadOrStore as cache insertion is atomic
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": keyS}).Info("Registering event in new entry in DB")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
 		v = NewPirDBEntry()
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 		S.Db.Store(keyS, v)
 	} else {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": keyS}).Info("Adding event in entry in DB")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 	}
 	if v, loaded := S.Db.Load(keyG); !loaded { //no nead for LoadOrStore as cache insertion is atomic
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": keyG}).Info("Registering event in new entry in DB")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
 		v = NewPirDBEntry()
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 		S.Db.Store(keyG, v)
 	} else {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": keyG}).Info("Adding event in entry in DB")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 	}
 	S.checkContext()
@@ -279,15 +283,23 @@ func (S *PIRDBStorage) checkContext() {
 	var err error
 	if S.Context.Items <= S.Items {
 		//bigger context needed
-		S.Context, err = settings.NewPirContext(S.Items*2, DEFAULTSIZE, DEFAULTN, DEFAULTDIMS)
+		n := DEFAULTN
+		if S.Items > 1<<20 {
+			n = 1 << 14
+		}
+		S.Context, err = settings.NewPirContext(S.Items*2, DEFAULTSIZE, n, DEFAULTDIMS)
 		if err != nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Info("Error while enlarging DB")
 			panic(err)
 		}
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to bigger DB representation")
 		S.encode()
-	} else if S.Context.Items >= 2*S.Items {
-		S.Context, err = settings.NewPirContext(S.Items*2, DEFAULTSIZE, DEFAULTN, DEFAULTDIMS)
+	} else if S.Context.Items >= S.Items {
+		n := DEFAULTN
+		if S.Items > 1<<20 {
+			n = 1 << 14
+		}
+		S.Context, err = settings.NewPirContext(S.Items, DEFAULTSIZE, n, DEFAULTDIMS)
 		if err != nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Info("Error while shrinking DB")
 			panic(err)

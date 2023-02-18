@@ -105,7 +105,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 		if item, ok := BE.captures[resolveRequest.Id]; ok {
 			BE.cLock.RUnlock()
 			//valid request
-			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "id": resolveRequest.Id, "leak": resolveRequest.Leakage}).Info("Starting resolution")
+			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "id": resolveRequest.Id, "leak": resolveRequest.Leakage, "type": resolveRequest.Type}).Info("Starting resolution")
 			stored := false
 			record := new(Association)
 			record = nil //make a nil pointer to association
