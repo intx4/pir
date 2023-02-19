@@ -281,6 +281,7 @@ func (PS *PIRServer) cache() {
 // Checks the current state of the DB and updates the context, if needed
 func (S *PIRDBStorage) checkContext() {
 	var err error
+	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash(), "actual items": S.Items, "configured items": S.Context.Items}).Info("Checking context")
 	if S.Context.Items <= S.Items {
 		//bigger context needed
 		n := DEFAULTN
