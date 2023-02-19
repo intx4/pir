@@ -295,7 +295,7 @@ func (S *PIRDBStorage) checkContext() {
 		}
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to bigger DB representation")
 		S.encode()
-	} else if S.Context.Items >= 2*S.Items {
+	} else if S.Context.Items > 2*S.Items {
 		n := DEFAULTN
 		if S.Items > 1<<20 {
 			n = 1 << 14
