@@ -165,10 +165,10 @@ func (S *PIRDBStorage) getContext() settings.PirContext {
 	return *S.Context
 }
 
-// Encode S DB as hypercube according to context in a concurrent fashion
-func (S *PIRDBStorage) encode() {
+// re-Encode S DB as hypercube according to context in a concurrent fashion
+func (S *PIRDBStorage) reEncode() {
 	ctx := S.Context
-	_, Kd, dimentions := ctx.K, ctx.Kd, ctx.Dim
+	Kd, dimentions := ctx.Kd, ctx.Dim
 
 	ecdStorage := new(sync.Map)
 	var wg sync.WaitGroup
@@ -180,25 +180,37 @@ func (S *PIRDBStorage) encode() {
 		poolCh <- struct{}{}
 	}
 	S.Db.Range(func(key, value any) bool {
-		k, _ := utils.MapKeyToDim([]byte(key.(string)), Kd, dimentions)
 		<-poolCh
 		wg.Add(1)
-		go func(key string, value *PIRDBEntry) {
+		go func(value *PIRDBEntry) {
 			defer wg.Done()
-			if e, load := ecdStorage.LoadOrStore(key, value); load {
-				//merge atomically the two values
-				e.(*PIRDBEntry).Mux.Lock()
-				value.Mux.Lock()
-				e.(*PIRDBEntry).Value = append(e.(*PIRDBEntry).Value, value.Value...)
-				value.Mux.Unlock()
-				e.(*PIRDBEntry).Mux.Unlock()
+			for _, item := range value.Value {
+				record := item.(*ICFRecord)
+				k, _ := utils.MapKeyToDim([]byte(record.Suci), Kd, dimentions)
+				utils.Logger.WithFields(logrus.Fields{"suci": record.Suci, "key": k, "context": ctx.Hash()}).Debug("Reassigning entry in encode")
+				if e, load := ecdStorage.LoadOrStore(k, value); load {
+					//merge atomically the two values
+					e.(*PIRDBEntry).Mux.Lock()
+					e.(*PIRDBEntry).Value = append(e.(*PIRDBEntry).Value, value.Value...)
+					e.(*PIRDBEntry).Items += value.Items
+					e.(*PIRDBEntry).Mux.Unlock()
+				}
+				k, _ = utils.MapKeyToDim([]byte(record.FiveGGUTI), Kd, dimentions)
+				utils.Logger.WithFields(logrus.Fields{"guti": record.FiveGGUTI, "key": k, "context": ctx.Hash()}).Debug("Reassigning entry in encode")
+				if e, load := ecdStorage.LoadOrStore(k, value); load {
+					//merge atomically the two values
+					e.(*PIRDBEntry).Mux.Lock()
+					e.(*PIRDBEntry).Value = append(e.(*PIRDBEntry).Value, value.Value...)
+					e.(*PIRDBEntry).Items += value.Items
+					e.(*PIRDBEntry).Mux.Unlock()
+				}
 			}
 			poolCh <- struct{}{}
-		}(k, value.(*PIRDBEntry))
+		}(value.(*PIRDBEntry))
 		return true
 	})
 	wg.Wait()
-	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "context": S.Context}).Info("Encoded DB")
+	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "context": S.Context.Hash()}).Info("Encoded DB")
 	S.Db = ecdStorage
 }
 
@@ -294,7 +306,7 @@ func (S *PIRDBStorage) checkContext() {
 			panic(err)
 		}
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to bigger DB representation")
-		S.encode()
+		S.reEncode()
 	} else if S.Context.Items > 2*S.Items {
 		n := DEFAULTN
 		if S.Items > 1<<20 {
@@ -306,7 +318,7 @@ func (S *PIRDBStorage) checkContext() {
 			panic(err)
 		}
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to smaller DB representation")
-		S.encode()
+		S.reEncode()
 	}
 }
 
