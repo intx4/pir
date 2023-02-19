@@ -100,7 +100,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Failed to read WebSocket message")
 			break
 		}
-		BE.cLock.Lock()
+		BE.cLock.RLock()
 		if item, ok := BE.captures[resolveRequest.Id]; ok {
 			BE.cLock.RUnlock()
 			//valid request
@@ -271,7 +271,7 @@ func (BE *BackEndServer) notifyFrontEnd() {
 				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Could not notify frontend")
 				break
 			}
-			time.Sleep(500 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
+			time.Sleep(1000 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
 		} else {
 			break
 		}
