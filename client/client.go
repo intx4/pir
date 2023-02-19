@@ -25,6 +25,8 @@ import (
 	"time"
 )
 
+var CONTEXTTTL = 30 * time.Second //30s
+
 type InternalRequest struct {
 	// Sent from backend to pir logic
 	Key           []byte
@@ -104,6 +106,12 @@ func (PC *PIRClient) ListenForQueries() {
 			}
 			payload, err := PC.ParseAnswer(answer, profile)
 			if err != nil {
+				if err.Error() == settings.ContextError {
+					utils.Logger.WithFields(logrus.Fields{"service": "client", "key": command.Key, "error": err.Error()}).Warn("Retrying with updated context")
+					//resend with updated context -> recirculate
+					go func(command *InternalRequest) { PC.RequestChan <- command }(command)
+					continue
+				}
 				utils.Logger.WithFields(logrus.Fields{"service": "client", "error": err.Error()}).Error("Error")
 				go func(err error) {
 					PC.ResponseChan <- &InternalResponse{Error: err}
