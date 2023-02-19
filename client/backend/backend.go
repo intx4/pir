@@ -65,7 +65,6 @@ type BackEndServer struct {
 	cLock            *sync.RWMutex
 	conn             *websocket.Conn
 	currentId        int
-	capturesCache    chan *Capture           //caches captures to be sent to frontend
 	captures         map[int]*Capture        //reflects what's shown in frontend
 	associations     map[int]*Association    //reflects what's shown in frontend
 	captureChan      CaptureChannel          //reads captures from interceptor
@@ -84,7 +83,7 @@ func NewBackend(Ip string, Port string, reqCh client.RequestChannel, resCh clien
 		cLock:            new(sync.RWMutex),
 		captures:         make(map[int]*Capture),
 		associations:     make(map[int]*Association),
-		captureChan:      make(CaptureChannel),
+		captureChan:      make(CaptureChannel, 2000),
 		associationCache: make(map[string]*Association),
 		RequestChan:      reqCh,
 		ResponseChan:     resCh,
@@ -94,14 +93,14 @@ func NewBackend(Ip string, Port string, reqCh client.RequestChannel, resCh clien
 }
 
 func (BE *BackEndServer) handleResolveRequest() {
-	for {
+	for BE.conn != nil {
 		resolveRequest := new(ResolveRequest)
 		err := BE.conn.ReadJSON(resolveRequest)
 		if err != nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Failed to read WebSocket message")
 			break
 		}
-		BE.cLock.RLock()
+		BE.cLock.Lock()
 		if item, ok := BE.captures[resolveRequest.Id]; ok {
 			BE.cLock.RUnlock()
 			//valid request
@@ -240,7 +239,9 @@ func (BE *BackEndServer) handleResolveRequest() {
 			//record should be not nil, either from PIR answer or cache
 			if record != nil {
 				record.Id = resolveRequest.Id //associate record with Id, either if from cache or fresh
+				BE.cLock.Lock()
 				BE.associations[resolveRequest.Id] = record
+				BE.cLock.Unlock()
 				cleanRecord := new(Association)
 				//cleanup end time
 				*cleanRecord = *record
@@ -255,7 +256,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 		} else {
 			BE.cLock.RUnlock()
 		}
-		time.Sleep(2 * time.Millisecond)
+		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -263,7 +264,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 func (BE *BackEndServer) notifyFrontEnd() {
 	for true {
 		if BE.conn != nil {
-			capture := <-BE.capturesCache
+			capture := <-BE.captureChan
 			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "capture": capture.Id}).Info("Sending...")
 			err := BE.conn.WriteJSON(capture)
 			if err != nil {
@@ -271,6 +272,8 @@ func (BE *BackEndServer) notifyFrontEnd() {
 				break
 			}
 			time.Sleep(500 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
+		} else {
+			break
 		}
 	}
 }
@@ -278,6 +281,8 @@ func (BE *BackEndServer) notifyFrontEnd() {
 // Upon first connection restablish state of frontend
 func (BE *BackEndServer) syncFrontend() {
 	utils.Logger.WithFields(logrus.Fields{"service": "Backend"}).Info("Sync frontend...")
+	BE.cLock.RLock()
+	defer BE.cLock.RUnlock()
 	for _, capture := range BE.captures {
 		BE.conn.WriteJSON(capture)
 		time.Sleep(100 * time.Millisecond)
@@ -336,7 +341,7 @@ func (BE *BackEndServer) Start(errCh chan error) {
 				BE.cLock.Unlock()
 				w.WriteHeader(200)
 				w.Write([]byte("ok"))
-				BE.capturesCache <- capture
+				go func(capture *Capture) { BE.captureChan <- capture }(capture)
 			}
 		}
 	})
