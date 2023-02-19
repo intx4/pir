@@ -20,7 +20,7 @@ import (
 )
 
 var DEFAULTSIZE = 300 * 8
-var DEFAULTSTARTITEMS = 1 << 8 //256
+var DEFAULTSTARTITEMS = 1 << 10 //1024
 var DEFAULTDIMS = 3
 var DEFAULTN = 1 << 13
 
@@ -227,24 +227,24 @@ func (S *PIRDBStorage) Add(event *IEFRecord) {
 	}
 	if v, loaded := S.Db.Load(keyS); !loaded { //no nead for LoadOrStore as cache insertion is atomic
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": keyS}).Info("Registering event in new entry in DB")
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N, "hash": S.Context.Hash()}).Debug("With Context")
 		v = NewPirDBEntry()
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 		S.Db.Store(keyS, v)
 	} else {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "suci": suci, "key": keyS}).Info("Adding event in entry in DB")
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N, "hash": S.Context.Hash()}).Debug("With Context")
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 	}
 	if v, loaded := S.Db.Load(keyG); !loaded { //no nead for LoadOrStore as cache insertion is atomic
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": keyG}).Info("Registering event in new entry in DB")
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N, "hash": S.Context.Hash()}).Debug("With Context")
 		v = NewPirDBEntry()
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 		S.Db.Store(keyG, v)
 	} else {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "guti": guti, "key": keyG}).Info("Adding event in entry in DB")
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N}).Debug("With Context")
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N, "hash": S.Context.Hash()}).Debug("With Context")
 		S.Items += v.(*PIRDBEntry).AddValue(event)
 	}
 	S.checkContext()
@@ -676,6 +676,7 @@ func spawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 func (S *PIRDBStorage) Answer(query *messages.PIRQuery, box *settings.HeBox) ([]*rlwe.Ciphertext, error) {
 	S.Mux.RLock()
 	defer S.Mux.RUnlock()
+	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "Dimentions": S.Context.Dim, "Kd": S.Context.Kd, "N": S.Context.N, "hash": S.Context.Hash()}).Debug("With Context")
 	start := time.Now()
 	queryProc, err := S.processPIRQuery(query, box)
 	if err != nil {

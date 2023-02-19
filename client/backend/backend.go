@@ -65,7 +65,7 @@ type BackEndServer struct {
 	cLock            *sync.RWMutex
 	conn             *websocket.Conn
 	currentId        int
-	capturesCache    []*Capture              //caches captures to be sent to frontend
+	capturesCache    chan *Capture           //caches captures to be sent to frontend
 	captures         map[int]*Capture        //reflects what's shown in frontend
 	associations     map[int]*Association    //reflects what's shown in frontend
 	captureChan      CaptureChannel          //reads captures from interceptor
@@ -151,6 +151,11 @@ func (BE *BackEndServer) handleResolveRequest() {
 				response := <-BE.ResponseChan
 				if response.Error != nil {
 					utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": response.Error.Error()}).Error("Response error from PIR logic")
+					BE.conn.WriteJSON(&Association{
+						Type:  TYPEASSOCIATION,
+						Id:    resolveRequest.Id,
+						Error: fmt.Sprintf("Error processing request, try again"),
+					})
 					continue
 				} else {
 					//look in records while caching
@@ -258,27 +263,20 @@ func (BE *BackEndServer) handleResolveRequest() {
 func (BE *BackEndServer) notifyFrontEnd() {
 	for true {
 		if BE.conn != nil {
-			for len(BE.capturesCache) > 0 {
-				capture := BE.capturesCache[0]
-				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "capture": capture.Id}).Info("Sending...")
-				err := BE.conn.WriteJSON(capture)
-				if err != nil {
-					utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Could not notify frontend")
-					break
-				} else {
-					BE.cLock.Lock()
-					BE.captures[capture.Id] = capture
-					BE.cLock.Unlock()
-					if len(BE.capturesCache) >= 2 {
-						BE.capturesCache = BE.capturesCache[1:]
-					} else {
-						BE.capturesCache = []*Capture{}
-					}
-				}
-				time.Sleep(500 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
+			capture := <-BE.capturesCache
+			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "capture": capture.Id}).Info("Sending...")
+			err := BE.conn.WriteJSON(capture)
+			if err != nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Could not notify frontend")
+				break
+			} else {
+				//record
+				BE.cLock.Lock()
+				BE.captures[capture.Id] = capture
+				BE.cLock.Unlock()
 			}
+			time.Sleep(500 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
 		}
-		time.Sleep(1 * time.Millisecond)
 	}
 }
 
@@ -327,6 +325,7 @@ func (BE *BackEndServer) Start(errCh chan error) {
 					Timestamp: interception.Timestamp,
 				}
 				BE.currentId++
+				BE.cLock.Unlock()
 				if interception.Type == TYPESUCI {
 					capture.Suci = interception.Value
 					capture.Guti = "-"
@@ -336,8 +335,7 @@ func (BE *BackEndServer) Start(errCh chan error) {
 				} else {
 					utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": fmt.Sprintf("Not a valid capture type: %s", interception.Type)}).Error("Invalid capture")
 				}
-				BE.capturesCache = append(BE.capturesCache, capture)
-				BE.cLock.Unlock()
+				BE.capturesCache <- capture
 			}
 		}
 	})

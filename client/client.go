@@ -270,7 +270,7 @@ func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage 
 	}
 	keyInDb, _ := utils.MapKeyToDim(key, PC.Context.Kd, PC.Context.Dim)
 	utils.Logger.WithFields(logrus.Fields{"service": "client", "key": string(key), "DB pos": keyInDb, "leak": leakage}).Info("Generated Query")
-	utils.Logger.WithFields(logrus.Fields{"service": "client", "Dimentions": PC.Context.Dim, "Kd": PC.Context.Kd, "N": PC.Context.N}).Debug("With Context")
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "Dimentions": PC.Context.Dim, "Kd": PC.Context.Kd, "N": PC.Context.N, "hash": PC.Context.Hash()}).Debug("With Context")
 	return q, leakedBits, err
 }
 
