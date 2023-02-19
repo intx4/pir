@@ -188,20 +188,26 @@ func (S *PIRDBStorage) reEncode() {
 				record := item.(*ICFRecord)
 				k, _ := utils.MapKeyToDim([]byte(record.Suci), Kd, dimentions)
 				utils.Logger.WithFields(logrus.Fields{"suci": record.Suci, "key": k, "context": ctx.Hash()}).Debug("Reassigning entry in encode")
-				if e, load := ecdStorage.LoadOrStore(k, value); load {
+				v := NewPirDBEntry()
+				v.Items = 1
+				v.Value = append(v.Value, item)
+				if e, load := ecdStorage.LoadOrStore(k, v); load {
 					//merge atomically the two values
 					e.(*PIRDBEntry).Mux.Lock()
-					e.(*PIRDBEntry).Value = append(e.(*PIRDBEntry).Value, value.Value...)
-					e.(*PIRDBEntry).Items += value.Items
+					e.(*PIRDBEntry).Value = append(e.(*PIRDBEntry).Value, item)
+					e.(*PIRDBEntry).Items += 1
 					e.(*PIRDBEntry).Mux.Unlock()
 				}
 				k, _ = utils.MapKeyToDim([]byte(record.FiveGGUTI), Kd, dimentions)
 				utils.Logger.WithFields(logrus.Fields{"guti": record.FiveGGUTI, "key": k, "context": ctx.Hash()}).Debug("Reassigning entry in encode")
-				if e, load := ecdStorage.LoadOrStore(k, value); load {
+				v = NewPirDBEntry()
+				v.Items = 1
+				v.Value = append(v.Value, item)
+				if e, load := ecdStorage.LoadOrStore(k, v); load {
 					//merge atomically the two values
 					e.(*PIRDBEntry).Mux.Lock()
-					e.(*PIRDBEntry).Value = append(e.(*PIRDBEntry).Value, value.Value...)
-					e.(*PIRDBEntry).Items += value.Items
+					e.(*PIRDBEntry).Value = append(e.(*PIRDBEntry).Value, item)
+					e.(*PIRDBEntry).Items += 1
 					e.(*PIRDBEntry).Mux.Unlock()
 				}
 			}
