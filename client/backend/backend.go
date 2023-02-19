@@ -269,11 +269,6 @@ func (BE *BackEndServer) notifyFrontEnd() {
 			if err != nil {
 				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Could not notify frontend")
 				break
-			} else {
-				//record
-				BE.cLock.Lock()
-				BE.captures[capture.Id] = capture
-				BE.cLock.Unlock()
 			}
 			time.Sleep(500 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
 		}
@@ -314,9 +309,9 @@ func (BE *BackEndServer) Start(errCh chan error) {
 			err := json.Unmarshal(buff, interception)
 			if err != nil {
 				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Error unmarshaling interception")
+				w.WriteHeader(500)
+				w.Write([]byte("Error unmarshaling interception"))
 			} else {
-				w.WriteHeader(200)
-				w.Write([]byte("ok"))
 				BE.cLock.Lock()
 				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "capture": BE.currentId}).Info("Received capture")
 				capture := &Capture{
@@ -324,8 +319,6 @@ func (BE *BackEndServer) Start(errCh chan error) {
 					Id:        BE.currentId,
 					Timestamp: interception.Timestamp,
 				}
-				BE.currentId++
-				BE.cLock.Unlock()
 				if interception.Type == TYPESUCI {
 					capture.Suci = interception.Value
 					capture.Guti = "-"
@@ -334,7 +327,15 @@ func (BE *BackEndServer) Start(errCh chan error) {
 					capture.Suci = "-"
 				} else {
 					utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": fmt.Sprintf("Not a valid capture type: %s", interception.Type)}).Error("Invalid capture")
+					w.WriteHeader(400)
+					w.Write([]byte(fmt.Sprintf("Not a valid capture type: %s", interception.Type)))
 				}
+				BE.currentId++
+				//record
+				BE.captures[capture.Id] = capture
+				BE.cLock.Unlock()
+				w.WriteHeader(200)
+				w.Write([]byte("ok"))
 				BE.capturesCache <- capture
 			}
 		}
