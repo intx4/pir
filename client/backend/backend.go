@@ -257,7 +257,6 @@ func (BE *BackEndServer) handleResolveRequest() {
 		} else {
 			BE.cLock.RUnlock()
 		}
-		time.Sleep(10 * time.Millisecond)
 	}
 }
 
@@ -272,7 +271,7 @@ func (BE *BackEndServer) notifyFrontEnd() {
 				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Could not notify frontend")
 				break
 			}
-			time.Sleep(1000 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
+			time.Sleep(100 * time.Millisecond) //super hugly for handling updates in frontend with no race condition
 		} else {
 			break
 		}
