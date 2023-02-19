@@ -123,7 +123,7 @@ func (PC *PIRClient) ListenForQueries() {
 						end := time.Since(start).Seconds()
 						go func(records []*server.ICFRecord, leakedBits float64, end float64) {
 							PC.ResponseChan <- &InternalResponse{Payload: records, Leakage: leakedBits, Latency: end}
-						}(records, leakedBits/float64(PC.Context.Items), end)
+						}(records, leakedBits/math.Log2(float64(PC.Context.Items)), end)
 						continue
 					}
 				}
