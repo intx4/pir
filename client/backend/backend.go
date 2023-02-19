@@ -100,6 +100,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Failed to read WebSocket message")
 			break
 		}
+		utils.Logger.WithFields(logrus.Fields{"service": "Backend", "id": resolveRequest.Id, "leakage": resolveRequest.Leakage, "type": resolveRequest.Type}).Debug("Resolve request received")
 		BE.cLock.RLock()
 		if item, ok := BE.captures[resolveRequest.Id]; ok {
 			BE.cLock.RUnlock()
