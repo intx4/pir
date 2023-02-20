@@ -631,6 +631,9 @@ func (S *PIRDBStorage) answerGen(box *settings.HeBox, prefix string, query [][]*
 			}
 			return true
 		})
+		if finalRound {
+			break
+		}
 	}
 	close(taskCh)
 	wg.Wait()
@@ -670,7 +673,6 @@ func spawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 			//}
 			intermediateResult = append(intermediateResult, el)
 		}
-		//compress (accumulate result with lazy modswitch and relin) atomically
 		if result, loaded := task.ResultMap.LoadOrStore(
 			task.ResultKey, &PIREntry{Mux: new(sync.RWMutex), Ops: intermediateResult}); loaded {
 			result.(*PIREntry).Mux.Lock()

@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"pir/client"
+	"pir/messages"
 	"pir/server"
 	"sync"
 	"time"
@@ -38,10 +39,20 @@ type Capture struct {
 	Timestamp string `json:"timestamp,omitempty"`
 }
 
+// Resolve item with given id
+// -1 is a special request with information (leakage or type)
 type ResolveRequest struct {
-	Id      int    `json:"id"`
-	Type    string `json:"type"`
-	Leakage int    `json:"leakage"`
+	Id          int          `json:"id"`
+	InfoLeakage *InfoLeakage `json:"infoLeakage,omitempty"`
+	InfoType    *InfoType    `json:"infoType,omitempty"`
+}
+
+type InfoLeakage struct {
+	Leakage int `json:"leakage"`
+}
+
+type InfoType struct {
+	Type string `json:"type"`
 }
 
 type Association struct {
@@ -69,6 +80,8 @@ type BackEndServer struct {
 	associations     map[int]*Association    //reflects what's shown in frontend
 	captureChan      CaptureChannel          //reads captures from interceptor
 	associationCache map[string]*Association //extra records already resolved
+	currentLeakage   int                     //leakage to use for query
+	currentQueryType string                  //type of key used for query
 	RequestChan      client.RequestChannel   //to PIR logic
 	ResponseChan     client.ResponseChannel  //from PIR logic
 	Ip               string
@@ -85,6 +98,8 @@ func NewBackend(Ip string, Port string, reqCh client.RequestChannel, resCh clien
 		associations:     make(map[int]*Association),
 		captureChan:      make(CaptureChannel, 2000),
 		associationCache: make(map[string]*Association),
+		currentQueryType: TYPESUCI,
+		currentLeakage:   messages.NONELEAKAGE,
 		RequestChan:      reqCh,
 		ResponseChan:     resCh,
 		Ip:               Ip,
@@ -100,16 +115,40 @@ func (BE *BackEndServer) handleResolveRequest() {
 			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "error": err.Error()}).Error("Failed to read WebSocket message")
 			break
 		}
-		utils.Logger.WithFields(logrus.Fields{"service": "Backend", "id": resolveRequest.Id, "leakage": resolveRequest.Leakage, "type": resolveRequest.Type}).Debug("Resolve request received")
+		if resolveRequest.Id == -1 {
+			//management
+			if resolveRequest.InfoType != nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "type": resolveRequest.InfoType.Type}).Info("Changing query type setting")
+				BE.cLock.Lock()
+				BE.currentQueryType = resolveRequest.InfoType.Type
+				BE.cLock.Unlock()
+				continue
+			} else if resolveRequest.InfoLeakage != nil {
+				utils.Logger.WithFields(logrus.Fields{"service": "Backend", "leakage": resolveRequest.InfoLeakage.Leakage}).Info("Changing query type setting")
+				BE.cLock.Lock()
+				BE.currentLeakage = resolveRequest.InfoLeakage.Leakage
+				BE.cLock.Unlock()
+				continue
+			} else {
+				utils.Logger.WithFields(logrus.Fields{"service": "Backend"}).Error("Invalid resolve management request")
+				continue
+			}
+		}
+		leakage := messages.NONELEAKAGE
+		typ := TYPESUCI
+		BE.cLock.RLock()
+		leakage, typ = BE.currentLeakage, BE.currentQueryType
+		BE.cLock.RUnlock()
+		utils.Logger.WithFields(logrus.Fields{"service": "Backend", "id": resolveRequest.Id, "leakage": leakage, "type": typ}).Debug("Resolve request received")
 		BE.cLock.RLock()
 		if item, ok := BE.captures[resolveRequest.Id]; ok {
 			BE.cLock.RUnlock()
 			//valid request
-			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "id": resolveRequest.Id, "leak": resolveRequest.Leakage, "type": resolveRequest.Type}).Info("Starting resolution")
+			utils.Logger.WithFields(logrus.Fields{"service": "Backend", "id": resolveRequest.Id, "leak": leakage, "type": typ}).Info("Starting resolution")
 			stored := false
 			record := new(Association)
 			record = nil //make a nil pointer to association
-			if resolveRequest.Type == TYPESUCI {
+			if typ == TYPESUCI {
 				if record, stored = BE.associationCache[item.Suci]; stored {
 					utils.Logger.WithFields(logrus.Fields{"service": "Backend", "record": (&server.ICFRecord{
 						Supi:          record.Supi,
@@ -123,8 +162,8 @@ func (BE *BackEndServer) handleResolveRequest() {
 					BE.RequestChan <- &client.InternalRequest{
 						Key:           []byte(item.Suci),
 						Expansion:     true,
-						WeaklyPrivate: resolveRequest.Leakage != 0,
-						Leakage:       resolveRequest.Leakage,
+						WeaklyPrivate: leakage != 0,
+						Leakage:       leakage,
 					}
 				}
 			} else {
@@ -141,8 +180,8 @@ func (BE *BackEndServer) handleResolveRequest() {
 					BE.RequestChan <- &client.InternalRequest{
 						Key:           []byte(item.Guti),
 						Expansion:     true,
-						WeaklyPrivate: resolveRequest.Leakage != 0,
-						Leakage:       resolveRequest.Leakage,
+						WeaklyPrivate: leakage != 0,
+						Leakage:       leakage,
 					}
 				}
 			}
@@ -162,7 +201,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 					found := false
 					for _, r := range response.Payload {
 						utils.Logger.WithFields(logrus.Fields{"Association": r.String()}).Info("New Association Record")
-						if resolveRequest.Type == TYPESUCI {
+						if typ == TYPESUCI {
 							if r.Suci == item.Suci {
 								found = true
 								record = &Association{
@@ -217,7 +256,7 @@ func (BE *BackEndServer) handleResolveRequest() {
 						}
 					}
 					if !found {
-						if resolveRequest.Type == TYPESUCI {
+						if typ == TYPESUCI {
 							utils.Logger.WithFields(logrus.Fields{"SUCI": item.Suci}).Warn("Association Record Not Found")
 							BE.conn.WriteJSON(&Association{
 								Type:  TYPEASSOCIATION,

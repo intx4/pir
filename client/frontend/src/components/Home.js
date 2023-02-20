@@ -58,7 +58,10 @@ function ResolveModal(props){
               <Row>
                 <Col>
                   <Form.Label>Leakage</Form.Label>
-                  <RangeSlider value={props.leakage} variant="warning" step={1} min={0} max={2} onChange={(e)=>props.setLeakage(e.target.value)}></RangeSlider>
+                  <RangeSlider value={props.leakage} variant="warning" step={1} min={0} max={2} onChange={(e)=>{
+                    props.handleLeakageChange(e.target.value);
+                    props.setLeakage(e.target.value);
+                  }}></RangeSlider>
                 </Col>
                 <Col>
                   <Form.Check
@@ -66,7 +69,7 @@ function ResolveModal(props){
                     label="Resolve by SUCI"
                     variant={"warning"}
                     checked={props.bySUCI}
-                    onChange={e => props.setBySUCI(e.target.checked)}
+                    onChange={e => {props.handleTypeChange(e.target.checked);props.setBySUCI(e.target.checked)}}
                 /></Col>
                 <Col>
                   <Button variant="success" onClick={() => {
@@ -107,14 +110,17 @@ function ResolveModal(props){
             <Row>
               <Col>
                 <Form.Label>Leakage</Form.Label>
-                <RangeSlider value={props.leakage} variant="warning" step={1} min={0} max={2} onChange={(e)=>props.setLeakage(e.target.value)}></RangeSlider>
+                <RangeSlider value={props.leakage} variant="warning" step={1} min={0} max={2} onChange={(e)=>{
+                  props.handleLeakageChange(e.target.value);
+                  props.setLeakage(e.target.value);
+                }}></RangeSlider>
               </Col>
               <Col><Form.Check
                   type="switch"
                   label="Resolve by SUCI"
                   variant={"warning"}
                   checked={props.bySUCI}
-                  onChange={e => props.setBySUCI(e.target.checked)}
+                  onChange={e => {props.handleTypeChange(e.target.checked); props.setBySUCI(e.target.checked)}}
               /></Col>
               <Col>
                 <Button variant="danger" onClick={() => {
@@ -238,6 +244,25 @@ export default function Home(props) {
     };
   },[captures, associations, loadingCaptures, resolveAll, isResolvingAll, latencyMeasures, leakageMeasures])
 
+  function ChangeLeakage(leakage){
+    let obj = {
+      id: parseInt(-1),
+      infoLeakage: {leakage:parseInt(leakage)},
+    };
+    console.log("Change leakage")
+    console.log(obj)
+    ws.current.send(JSON.stringify(obj))
+  }
+
+  function ChangeType(bySUCI){
+    let obj = {
+      id: parseInt(-1),
+      infoType: {type: bySUCI === true ? "SUCI" : "TMSI"},
+    };
+    console.log("Change type")
+    console.log(obj)
+    ws.current.send(JSON.stringify(obj))
+  }
   async function Resolve() {
     console.log("Resolve");
     let ids = [];
@@ -262,7 +287,7 @@ export default function Home(props) {
     }
     setResolveAll(false);
     setClickedCaptureId(-1);
-    let delay = 1000; // Set the delay time in milliseconds
+    let delay = 500; // Set the delay time in milliseconds
     for (const id of ids) {
       let obj = {
         id: parseInt(id),
@@ -291,6 +316,8 @@ export default function Home(props) {
                     id={clickedCaptureId}
                     resolveAll={resolveAll} setResolveAll={setResolveAll}
                     isResolvingAll={isResolvingAll}
+                    handleLeakageChange={ChangeLeakage}
+                    handleTypeChange={ChangeType}
                     handleResolve={Resolve}></ResolveModal>
       <Nav></Nav>
         <Plots latencyMeasures={latencyMeasures} leakageMeasures={leakageMeasures}></Plots>

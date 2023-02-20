@@ -33,6 +33,8 @@ export default function CapturesComp (props) {
         })).length === 0){
         props.setIsResolvingAll(false);
     }
+
+
     return (
         <Container fluid={true}>
             <Row>
