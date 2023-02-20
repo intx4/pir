@@ -252,7 +252,6 @@ func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage 
 	q.Leakage = leakage
 	q.ClientId = PC.Id
 	q.Seed = seed
-	q.Profile = profile
 	q.Q = new(messages.PIRQueryItemContainer)
 	leakedBits := 0.0
 	if !weaklyPrivate {
@@ -280,6 +279,19 @@ func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage 
 		q.Q.Compressed, q.Prefix, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, int(s), box)
 	}
 	keyInDb, _ := utils.MapKeyToDim(key, PC.Context.Kd, PC.Context.Dim)
+	if profile.KnownByServer {
+		q.Profile = &settings.PIRProfile{
+			ParamsId:    profile.ParamsId,
+			ContextHash: profile.ContextHash,
+		}
+	} else {
+		q.Profile = &settings.PIRProfile{
+			Rlk:         profile.Rlk,
+			Rtks:        profile.Rtks,
+			ParamsId:    profile.ParamsId,
+			ContextHash: profile.ContextHash,
+		}
+	}
 	utils.Logger.WithFields(logrus.Fields{"service": "client", "key": string(key), "DB pos": keyInDb, "leak": leakage}).Info("Generated Query")
 	utils.Logger.WithFields(logrus.Fields{"service": "client", "Dimentions": PC.Context.Dim, "Kd": PC.Context.Kd, "N": PC.Context.N, "hash": PC.Context.Hash()}).Debug("With Context")
 	return q, leakedBits, err
