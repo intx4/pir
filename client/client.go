@@ -148,6 +148,9 @@ func (PC *PIRClient) AddContext(context *settings.PirContext) {
 
 // Generate profile given a set of parameters and stores it, if not already present. Context must be previously set
 func (PC *PIRClient) GenProfile(params bfv.Parameters, paramsId string) (*settings.PIRProfile, error) {
+	if PC.Context == nil {
+		return nil, errors.New("Context must be set before generating Profiles")
+	}
 	utils.Logger.WithFields(logrus.Fields{"service": "client", "paramsId": params}).Info("Generating profile")
 	box, err := settings.NewHeBox(params)
 	if err != nil {
