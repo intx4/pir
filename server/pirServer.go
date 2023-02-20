@@ -356,12 +356,16 @@ func (PS *PIRServer) AddProfile(clientId string, leakage int, pf *settings.PIRPr
 		PS.Profiles[ctx.Hash()] = make(map[string]*settings.PIRProfileSet)
 	}
 	if pf != nil {
-		if _, ok := PS.Profiles[ctx.Hash()][clientId]; !ok {
-			PS.Profiles[ctx.Hash()][clientId] = settings.NewProfileSet()
+		if pf.Rtks != nil && pf.Rlk != nil {
+			if _, ok := PS.Profiles[ctx.Hash()][clientId]; !ok {
+				PS.Profiles[ctx.Hash()][clientId] = settings.NewProfileSet()
+			}
+			PS.Profiles[ctx.Hash()][clientId].P[leakage] = pf
 		}
-		PS.Profiles[ctx.Hash()][clientId].P[leakage] = pf
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile Added")
+	} else {
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Warn("Skipping profile as no keys are contained")
 	}
-	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile Added")
 }
 
 func (PS *PIRServer) GetContext() *settings.PirContext {
