@@ -43,14 +43,13 @@ func RoundUpToDim(K float64, Dim int) (int, int) {
 	}
 }
 
-// Takes as input number of items in DB, bit size of items, and params
 func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, error) {
 	ctx := &PirContext{Items: Items, MaxBinSize: int(math.Floor((float64(TUsableBits*N) - math.Log2(float64(TUsableBits*N)) - float64(3*TUsableBits)) / float64(Size+8))), N: N} //- for padding and length, +8 is 1 byte for separator "|"
 	//compute key space https://link.springer.com/content/pdf/10.1007/3-540-49543-6_13.pdf
 	base := math.E
 	tollerance := 1.0
-	for tollerance < 10.0 {
-		maxIter := 1000
+	for tollerance < 2.0 {
+		maxIter := 2000
 		exp := 1.1
 		for maxIter > 0 {
 			K := math.Pow(base, exp)
@@ -66,13 +65,13 @@ func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, err
 			}}
 			solver := utils.NewtonKrylov{
 				// Maximum number of Newton iterations
-				Maxiter: 1e12,
+				Maxiter: 1e9,
 
 				// Stepsize used to approximate jacobian with finite differences
-				StepSize: 1e-3,
+				StepSize: 1e-2,
 
 				// Tolerance for the solution
-				Tol: 1e-6,
+				Tol: 1e-7,
 			}
 			dc := 0.0
 			roots := solver.Solve(prob, []float64{c, math.Pow(c, 2)}).X
@@ -85,6 +84,14 @@ func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, err
 			if math.Ceil((dc+1)*exp) < tollerance*float64(ctx.MaxBinSize) && dc != 0.0 {
 				ctx.ExpBinSize = int(math.Ceil((dc + 1) * exp))
 				ctx.K, ctx.Kd = RoundUpToDim(K, Dimentions)
+				if ctx.Kd > N {
+					//Kd > N not supported
+					ctx.K = 0
+					ctx.Kd = 0
+					maxIter--
+					exp += .01
+					continue
+				}
 				ctx.Dim = Dimentions
 				break
 			}
@@ -98,9 +105,6 @@ func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, err
 	}
 	if ctx.K == 0 {
 		return nil, errors.New("Could not estimate probabilistic bin size or right dimention split, try to adjust the BFV parameters")
-	}
-	if ctx.Kd > N {
-		return nil, errors.New("Kd > N is not supported")
 	}
 	return ctx, nil
 }
