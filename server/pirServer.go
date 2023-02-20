@@ -683,7 +683,7 @@ func spawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 				//this result is longer then the one we had, add the additional ciphertexts
 				newItemsIdx := len(result.(*PIREntry).Ops)
 				for len(result.(*PIREntry).Ops) < len(intermediateResult) {
-					result = append(result.(*PIREntry).Ops, intermediateResult[newItemsIdx])
+					result.(*PIREntry).Ops = append(result.(*PIREntry).Ops, intermediateResult[newItemsIdx])
 					newItemsIdx++
 				}
 			}
