@@ -161,10 +161,10 @@ func (PS *PIRServer) AddProfile(clientId string, leakage int, pf *settings.PIRPr
 				PS.Profiles[ctx.Hash()][clientId] = settings.NewProfileSet()
 			}
 			PS.Profiles[ctx.Hash()][clientId].P[leakage] = pf
+			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile Added")
+		} else {
+			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Warn("Skipping profile as no keys are contained")
 		}
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile Added")
-	} else {
-		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Warn("Skipping profile as no keys are contained")
 	}
 }
 
