@@ -42,6 +42,9 @@ func (PC *PIRClient) AddContext(context *settings.PirContext) {
 
 // Generate profile given a set of parameters and stores it, if not already present. Context must be previously set
 func (PC *PIRClient) GenProfile(params bfv.Parameters, paramsId string) (*settings.PIRProfile, error) {
+	if PC.Context == nil {
+		return nil, errors.New("Context must be set before generating Profiles")
+	}
 	utils.Logger.WithFields(logrus.Fields{"service": "client", "paramsId": params}).Info("Generating profile")
 	box, err := settings.NewHeBox(params)
 	if err != nil {
@@ -127,7 +130,6 @@ func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage 
 	q.Leakage = leakage
 	q.ClientId = PC.Id
 	q.Seed = seed
-	q.Profile = profile
 	q.Q = new(messages.PIRQueryItemContainer)
 	leakedBits := 0.0
 	if !weaklyPrivate {
@@ -155,6 +157,19 @@ func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage 
 		q.Q.Compressed, q.Prefix, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, int(s), box)
 	}
 	keyInDb, _ := utils.MapKeyToDim(key, PC.Context.Kd, PC.Context.Dim)
+	if profile.KnownByServer {
+		q.Profile = &settings.PIRProfile{
+			ParamsId:    profile.ParamsId,
+			ContextHash: profile.ContextHash,
+		}
+	} else {
+		q.Profile = &settings.PIRProfile{
+			Rlk:         profile.Rlk,
+			Rtks:        profile.Rtks,
+			ParamsId:    profile.ParamsId,
+			ContextHash: profile.ContextHash,
+		}
+	}
 	utils.Logger.WithFields(logrus.Fields{"service": "client", "key": string(key), "DB pos": keyInDb, "leak": leakage}).Info("Generated Query")
 	return q, leakedBits, err
 }

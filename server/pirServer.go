@@ -156,12 +156,16 @@ func (PS *PIRServer) AddProfile(clientId string, leakage int, pf *settings.PIRPr
 		PS.Profiles[ctx.Hash()] = make(map[string]*settings.PIRProfileSet)
 	}
 	if pf != nil {
-		if _, ok := PS.Profiles[ctx.Hash()][clientId]; !ok {
-			PS.Profiles[ctx.Hash()][clientId] = settings.NewProfileSet()
+		if pf.Rtks != nil && pf.Rlk != nil {
+			if _, ok := PS.Profiles[ctx.Hash()][clientId]; !ok {
+				PS.Profiles[ctx.Hash()][clientId] = settings.NewProfileSet()
+			}
+			PS.Profiles[ctx.Hash()][clientId].P[leakage] = pf
 		}
-		PS.Profiles[ctx.Hash()][clientId].P[leakage] = pf
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile Added")
+	} else {
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Warn("Skipping profile as no keys are contained")
 	}
-	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": ctx.Hash(), "clientId": clientId, "leakage": leakage}).Info("Profile Added")
 }
 
 // set up box from profile
@@ -525,7 +529,7 @@ func spawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 				//this result is longer then the one we had, add the additional ciphertexts
 				newItemsIdx := len(result.(*PIREntry).Ops)
 				for len(result.(*PIREntry).Ops) < len(intermediateResult) {
-					result = append(result.(*PIREntry).Ops, intermediateResult[newItemsIdx])
+					result.(*PIREntry).Ops = append(result.(*PIREntry).Ops, intermediateResult[newItemsIdx])
 					newItemsIdx++
 				}
 			}
@@ -563,6 +567,8 @@ func (PS *PIRServer) Answer(query *messages.PIRQuery) (*messages.PIRAnswer, erro
 				Error:        "",
 				Ok:           true,
 			}, nil
+		} else {
+			return nil, errors.New(settings.ContextError)
 		}
 	} else if query.FetchContext {
 		return &messages.PIRAnswer{
