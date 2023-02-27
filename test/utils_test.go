@@ -88,11 +88,11 @@ func TestChunks(t *testing.T) {
 }
 
 func TestEncodeChunks(t *testing.T) {
-	lens := []int{50, 76, 100, 250, 395, 471}
+	lens := []int{50, 76, 100, 250, 395, 471, 8000}
 	ts := []int{16}
 
 	params, err := bfv.NewParametersFromLiteral(bfv.ParametersLiteral{
-		LogN: 12,
+		LogN: 13,
 		LogQ: QI[2][8192],   //this is actually QP from the RNS BFV paper
 		T:    uint64(65537), //Fermat prime
 	})

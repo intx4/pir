@@ -3,12 +3,17 @@ package test
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"google.golang.org/grpc/benchmark/latency"
+	"io"
 	"log"
 	"math"
 	"math/rand"
+	"net"
+	"net/http"
 	"os"
 	Client "pir/client"
 	"pir/messages"
@@ -16,6 +21,7 @@ import (
 	"pir/settings"
 	"pir/utils"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -24,14 +30,99 @@ import (
 var Mb = 1048576.0
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 16, 1 << 27, 1 << 26, 1 << 24, 1 << 20}
-var Sizes = []int{1000 * 8, 288 * 8, 30 * 8} //bits
+var ListOfEntries = []int{1 << 16, 1 << 20, 1 << 25} //, 1 << 24, 1 << 20, 1 << 16}
+var Sizes = []int{30 * 8, 288 * 8, 1000 * 8}         //bits
 
 // from TS 22.261 table 7.1-1
-var DLSpeeds = []float64{(25.0) * Mb, (50.0) * Mb, (300.0) * Mb, (1000.0) * Mb}
-var ULSpeeds = []float64{(50.0) * Mb, (25.0) * Mb, (50.0) * Mb, (500.0) * Mb}
+var DLSpeeds = []float64{(15.0) * Mb, (25.0) * Mb, (50.0) * Mb, (300.0) * Mb}
+var ULSpeeds = []float64{(10.0) * Mb, (50.0) * Mb, (25.0) * Mb, (50.0) * Mb}
 
-func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivate bool, leakage int, brokenParams *[]string) {
+func testDownloadTLS(t *testing.T, db map[string][]byte, entries, size, dl float64) float64 {
+	latencyOpts := &latency.Network{
+		Kbps: int(dl),
+		MTU:  1500,
+	}
+	file := make([]byte, 0)
+	for _, v := range db {
+		file = append(file, v...)
+	}
+	if len(file) != int(entries*(size/8)) {
+		t.Fatalf("Content is not of expected len")
+	}
+
+	// Create server
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Disposition", "attachment; filename=test.csv")
+			w.Header().Set("Content-Type", "application/octet-stream")
+			w.Header().Set("Content-Length", strconv.FormatInt(int64(len(file)), 10))
+			w.Header().Set("Connection", "close")
+			w.Header().Set("Expires", "-1")
+			buf := bytes.NewReader(file)
+			io.Copy(w, buf)
+		}),
+	}
+
+	// Start server
+	ln, err := net.Listen("tcp", serverAddr)
+	if err != nil {
+		t.Fatalf("Error starting server: %v", err)
+	}
+	lnLatency := latencyOpts.Listener(ln)
+	fmt.Println("Starting server TLS at...", serverAddr)
+	go func() {
+		err := server.ServeTLS(lnLatency, "./data/server.crt", "./data/server.key")
+		if err != nil && err != http.ErrServerClosed {
+			t.Fatalf(err.Error())
+		} else {
+			fmt.Println("Server listening")
+		}
+	}()
+
+	// create a client with TLS
+	client := &http.Client{
+		Transport: &http.Transport{
+			Dial: func(network, address string) (net.Conn, error) {
+				c, err := net.Dial("tcp", serverAddr)
+				if err != nil {
+					return nil, err
+				}
+				conn, err := latencyOpts.Conn(c)
+				if err != nil {
+					return nil, err
+				}
+				return conn, nil
+			},
+			TLSClientConfig: &tls.Config{
+				InsecureSkipVerify: true,
+			},
+		},
+	}
+
+	// download the file from the server
+	fmt.Println("Client retrieving file of size (GB):", len(file)/1e9)
+	time.Sleep(1 * time.Second)
+	start := time.Now()
+	resp, err := client.Get("https://" + serverAddr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(body) < int(len(file)) {
+		t.Fatalf("body if less then file")
+	}
+	end := time.Since(start).Seconds()
+	records := fmt.Sprintf("Entries=%f, Size=%f, Time=%f, BW=%f", entries, size/8, end, (dl/1024)/Mb)
+	log.Println(records)
+	server.Close()
+	return end
+}
+
+func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivate bool, leakage int, brokenParams *map[string]struct{}) {
 	csvFile := new(os.File)
 	var err error
 	skipHeader := false
@@ -68,11 +159,17 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 		}
 	*/
 	for _, entries := range ListOfEntries {
-		if entries > 1<<26 && !weaklyPrivate {
-			continue
-		}
+		//if entries > 1<<26 && !weaklyPrivate {
+		//	continue
+		//}
 		for _, size := range Sizes {
 			//fake db
+			//if size > 288 && entries > 1<<26 {
+			//	continue
+			//}
+			//if !weaklyPrivate && (entries >= 1<<27 && size >= 1000) {
+			//	continue
+			//}
 			keys := make([]string, entries)
 			values := make([][]byte, entries)
 			db := make(map[string][]byte)
@@ -84,17 +181,11 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					i++
 				}
 			}
-			for _, logN := range []int{12, 13, 14} {
-				for _, dimentions := range []int{2, 3} {
-					if size > 288 && logN == 12 {
-						continue
-					}
-					if size > 288 && entries > 1<<24 {
-						continue
-					}
-					if size >= 1<<27 && !weaklyPrivate {
-						continue
-					}
+			for _, logN := range []int{14, 13} {
+				for _, dimentions := range []int{3, 2} {
+					//if !weaklyPrivate && ((logN == 14 || (logN == 13 && dimentions > 2)) && entries >= 1<<25 && size >= 1000) {
+					//	continue
+					//}
 					log.Println(fmt.Sprintf("Testing %d entries of %d bytes, logN %d, dim %d", entries, size/8, logN, dimentions))
 					//first we create some parameters
 					paramsId, params := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
@@ -174,8 +265,8 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					if err != nil {
 						t.Logf(err.Error())
 						s, _ := settings.GetsParamForPIR(logN, dimentions, expansion, weaklyPrivate, leakage)
-						t.Logf("Broken set of params: " + s)
-						*brokenParams = append(*brokenParams, s)
+						t.Logf(fmt.Sprintf("Broken set of params < %s > -- items: %d, size: %d", s, entries, size))
+						(*brokenParams)[s] = struct{}{}
 						continue
 					}
 					if bytes.Compare(expected.(*Server.PIRDBEntry).Coalesce(), answerPt) != 0 {
@@ -216,17 +307,18 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 							t.Fatalf(err.Error())
 						}
 					}
-					for i := 0; i < len(ULSpeeds); i++ {
-						ULSpeed, DLSpeed := ULSpeeds[i], DLSpeeds[i]
-						queryUploadCost := float64(querySize*8) / ULSpeed
-						queryNoEvtKeysUploadCost := float64(querySizeNoEvtKeys*8) / ULSpeed
+					for i := 0; i < len(DLSpeeds); i++ {
+						DLSpeed := DLSpeeds[i]
+						queryUploadCost := float64(querySize*8) / DLSpeed
+						queryNoEvtKeysUploadCost := float64(querySizeNoEvtKeys*8) / DLSpeed
 						downloadCost := float64(answerSize*8) / DLSpeed
 						privacyBits := math.Log2(float64(entries)) - leakedBits
-						baseLine := ((math.Pow(2.0, privacyBits))*float64(size))/DLSpeed + (64.0 / ULSpeed) //index int64
+						//baseLine := ((math.Pow(2.0, privacyBits))*float64(size))/DLSpeed + (64.0 / DLSpeed) //index int64
+						baseLine := testDownloadTLS(t, db, math.Pow(2.0, privacyBits), float64(size), DLSpeed)
 						onlineTime := queryGenTime + answerGenTime + answerGetTime + queryUploadCost + downloadCost
 						onlineTimeNoKeys := onlineTime - queryUploadCost + queryNoEvtKeysUploadCost
 						//{"entries", "size", "dimentions", "LogN", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "leakedBits", "informationBits"}
-						records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %d, %d, %f, %d, %f, %f, %f, %f,%f, %f, %f, %f", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, querySize, querySizeNoEvtKeys, answerGenTime, answerSize, answerGetTime, onlineTime, onlineTimeNoKeys, baseLine, DLSpeed/Mb, ULSpeed/Mb, leakedBits, math.Log2(float64(entries)))
+						records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %d, %d, %f, %d, %f, %f, %f, %f,%f, %f, %f, %f", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, querySize, querySizeNoEvtKeys, answerGenTime, answerSize, answerGetTime, onlineTime, onlineTimeNoKeys, baseLine, DLSpeed/Mb, DLSpeed/Mb, leakedBits, math.Log2(float64(entries)))
 						err = csvW.Write(strings.Split(records, ","))
 						if err != nil {
 							t.Logf(err.Error())
@@ -242,7 +334,6 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 			}
 		}
 	}
-
 }
 
 func TestClientRetrieval(t *testing.T) {
@@ -256,22 +347,20 @@ func TestClientRetrieval(t *testing.T) {
 		leakage       int
 	}{
 		//{"No Expansion", DIR + "pirGo.csv", false, false, pir.NONELEAKAGE},
-		{"Expansion", DIR + "pirGoExp.csv", true, false, messages.NONELEAKAGE},
-		{"WPIR STD", DIR + "pirGoWP.csv", true, true, messages.STANDARDLEAKAGE},
-		{"WPIR HIGH", DIR + "pirGoWP.csv", true, true, messages.HIGHLEAKAGE},
+		{"Expansion", DIR + "pirGoExpTLS.csv", true, false, messages.NONELEAKAGE},
+		{"WPIR STD", DIR + "pirGoWPTLS.csv", true, true, messages.STANDARDLEAKAGE},
+		{"WPIR HIGH", DIR + "pirGoWPTLS.csv", true, true, messages.HIGHLEAKAGE},
 	}
-	brokenParams := make([]string, 0)
+
 	for _, tc := range testCases {
+		brokenParams := make(map[string]struct{})
 		t.Run(tc.name, func(t *testing.T) {
 			testClientRetrieval(t, tc.path, tc.expansion, tc.weaklyPrivate, tc.leakage, &brokenParams)
 		})
 		t.Logf("Broken params for %s :", tc.name)
-		for _, s := range brokenParams {
+		for s, _ := range brokenParams {
 			t.Logf(s)
 		}
-	}
-	t.Logf("Broken params:")
-	for _, s := range brokenParams {
-		t.Logf(s)
+		brokenParams = make(map[string]struct{})
 	}
 }

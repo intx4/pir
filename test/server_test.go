@@ -13,7 +13,7 @@ import (
 // Takes Time
 func TestServerEncode(t *testing.T) {
 	var items = []int{1 << 10, 1 << 12}
-	var sizes = []int{150 * 8, 250 * 8}
+	var sizes = []int{150 * 8, 250 * 8, 1000 * 8}
 
 	for _, item := range items {
 		for _, size := range sizes {
@@ -31,7 +31,7 @@ func TestServerEncode(t *testing.T) {
 			}
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
-					_, params := settings.GetsParamForPIR(logN, dimentions, false, false, messages.NONELEAKAGE)
+					_, params := settings.GetsParamForPIR(logN, dimentions, true, false, messages.NONELEAKAGE)
 					ctx, err := settings.NewPirContext(item, size, 1<<params.LogN(), dimentions)
 					server, _ := Server.NewPirServer(ctx, db)
 					//let's verify that values are encoded as expected

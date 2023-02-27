@@ -12,6 +12,7 @@ require (
 	git.sr.ht/~sbinet/gg v0.3.1 // indirect
 	github.com/DataDog/go-python3 v0.0.0-20211102160307-40adc605f1fe // indirect
 	github.com/ajstarks/svgo v0.0.0-20211024235047-1546f124cd8b // indirect
+	github.com/andybalholm/brotli v1.0.5 // indirect
 	github.com/christian-korneck/go-python3 v0.0.0-20200921060006-847aa92a90a5 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/go-fonts/liberation v0.2.0 // indirect
@@ -22,8 +23,11 @@ require (
 	github.com/gorilla/websocket v1.5.0 // indirect
 	github.com/khezen/rootfinding v1.0.1 // indirect
 	github.com/kisielk/godepgraph v0.0.0-20221115040737-2d0831789458 // indirect
+	github.com/klauspost/compress v1.15.15 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/sirupsen/logrus v1.9.0 // indirect
+	github.com/valyala/bytebufferpool v1.0.0 // indirect
+	github.com/valyala/fasthttp v1.44.0 // indirect
 	golang.org/x/crypto v0.0.0-20220926161630-eccd6366d1be // indirect
 	golang.org/x/exp v0.0.0-20221212164502-fae10dda9338 // indirect
 	golang.org/x/image v0.2.0 // indirect

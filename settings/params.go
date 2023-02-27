@@ -17,42 +17,42 @@ var DEFAULTPARAMS bfv.ParametersLiteral = bfv.ParametersLiteral{T: T, LogN: 13, 
 
 // Key = logN|Dimentions|{1|0}(1 if Expansion else 0)|{1|0}(1 if WPIR else 0)|{0|1|2}(0 if no WPIR, 1 if WPIR with STD leakage, 2 if WPIR with high leakage)
 var PARAMS = map[string]bfv.ParametersLiteral{
-	"12|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 54}, LogP: []int{20}}, //no expansion
-	"13|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60}},
-	"14|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60}},
-	"12|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 54}, LogP: []int{20}}, //no expansion
-	"13|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{60}},
-	"14|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 45, 45}, LogP: []int{60}},
-	"12|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 30}, LogP: []int{44}}, //expansion
-	"13|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 40, 40}, LogP: []int{50, 50}},
-	"14|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{50, 50}},
-	"12|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, //expansion
-	"13|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}},
-	"14|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 50, 50}, LogP: []int{50, 50}},
-	"12|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, //WPIR - d 2 (always 1 mul)
-	"12|2|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
-	"13|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
-	"13|2|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
-	"14|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
-	"14|2|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
-	"12|3|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, //WPIR - d 3 (if leak 1 -> 2 mul, if leak 2 -> 1 mul)
-	"12|3|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
-	"13|3|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60}},
-	"13|3|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{60}},
-	"14|3|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60}},
-	"14|3|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60}},
-	"12|4|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, // NOT USED d > 4 WPIR - d 4 (if leak 1 -> 2 mul, if leak 2 -> 1 mul)
-	"12|4|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
-	"13|4|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}},
-	"13|4|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{60, 60}},
-	"14|4|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60, 60}, LogP: []int{60, 60, 60}},
-	"14|4|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60, 60, 60, 60}},
-	"12|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, //WPIR - d 5 (if leak 1 -> 3 mul, if leak 2 -> 1 mul)
-	"12|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
-	"13|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}},
-	"13|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{60, 60}},
-	"14|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 45, 45}, LogP: []int{60, 60, 60, 60}}, //not working
-	"14|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60, 60, 60, 60}},
+	//"12|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 54}, LogP: []int{20}}, //no expansion
+	//"13|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60}},
+	//"14|2|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60}},
+	//"12|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 54}, LogP: []int{20}}, //no expansion
+	//"13|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{60, 60}, LogP: []int{60}}, //LogQ: []int{35, 45, 45}, LogP: []int{60}},
+	//"14|3|0|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{60, 60}, LogP: []int{60}}, //[]int{35, 45, 45}, LogP: []int{60}},
+	//"12|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{50, 59}, LogP: []int{39}},     //expansion
+	"13|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{60, 60}, LogP: []int{60}}, //LogQ: []int{35, 40, 40}, LogP: []int{50, 50}},
+	"14|2|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{60, 60}, LogP: []int{60}}, //LogQ: []int{35, 60, 60}, LogP: []int{60, 60}},
+	//"12|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 59}, LogP: []int{20}},     //expansion
+	"13|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60, 60}, LogP: []int{60}}, //LogQ: []int{35, 60, 60}, LogP: []int{60}},
+	"14|3|1|0|0": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60, 60}, LogP: []int{60}}, //LogQ: []int{35, 60, 60}, LogP: []int{60, 60}},
+	//"12|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{60}, LogP: []int{49}},         //LogQ: []int{35, 30}, LogP: []int{44}}, //WPIR - d 2 (always 1 mul)
+	//"12|2|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{60}, LogP: []int{49}},         //LogQ: []int{35, 30}, LogP: []int{44}},
+	"13|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60}}, //LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
+	"13|2|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60}}, //LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
+	"14|2|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60}}, //LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
+	"14|2|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60}, LogP: []int{60}}, //LogQ: []int{35, 35}, LogP: []int{49, 49, 49}},
+	//"12|3|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 50}, LogP: []int{29}},     //WPIR - d 3 (if leak 1 -> 2 mul, if leak 2 -> 1 mul)
+	//"12|3|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{60}, LogP: []int{49}},
+	"13|3|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{45, 60}, LogP: []int{60}},
+	"13|3|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{60}, LogP: []int{60}},
+	"14|3|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{45, 60}, LogP: []int{60}},
+	"14|3|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{60}, LogP: []int{60}},
+	//"12|4|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, // NOT USED d > 4 WPIR - d 4 (if leak 1 -> 2 mul, if leak 2 -> 1 mul)
+	//"12|4|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
+	//"13|4|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 60}, LogP: []int{60, 60}},
+	//"13|4|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{60, 60}},
+	//"14|4|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 60, 60}, LogP: []int{60, 60, 60}},
+	//"14|4|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60, 60, 60, 60}},
+	//"12|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}}, //WPIR - d 5 (if leak 1 -> 3 mul, if leak 2 -> 1 mul)
+	//"12|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 12, LogQ: []int{35, 35}, LogP: []int{39}},
+	//"13|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 45, 45}, LogP: []int{45, 45}},
+	//"13|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 13, LogQ: []int{35, 35}, LogP: []int{60, 60}},
+	//"14|5|1|1|1": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 45, 45}, LogP: []int{60, 60, 60, 60}}, //not working
+	//"14|5|1|1|2": bfv.ParametersLiteral{T: T, LogN: 14, LogQ: []int{35, 35}, LogP: []int{60, 60, 60, 60}},
 }
 
 func GetsParamForPIR(logN, dimentions int, expansion, weaklyPrivate bool, leakage int) (string, bfv.Parameters) {
