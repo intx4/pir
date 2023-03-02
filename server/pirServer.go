@@ -21,6 +21,7 @@ import (
 
 var DEFAULTDIMS = 3
 var ITEMSEPARATOR = []byte("|")
+var CPUS = runtime.NumCPU()
 
 type PIRDBEntry struct {
 	Items int      `json:"items,omitempty"`
@@ -109,7 +110,7 @@ func NewPirServer(ctx *settings.PirContext, db map[string][]byte) (*PIRServer, e
 
 	ecdStorage := new(sync.Map)
 	var wg sync.WaitGroup
-	pool := runtime.NumCPU()
+	pool := CPUS
 	poolCh := make(chan struct{}, pool)
 	//errCh := make(chan error)
 	//init pool chan
@@ -283,7 +284,7 @@ func (PS *PIRServer) Encode(ctx *settings.PirContext, db map[string][]byte) (*sy
 
 	ecdStorage := new(sync.Map)
 	var wg sync.WaitGroup
-	pool := runtime.NumCPU()
+	pool := CPUS
 	poolCh := make(chan struct{}, pool)
 	//errCh := make(chan error)
 	//init pool chan
@@ -368,8 +369,8 @@ func (PS *PIRServer) AnswerGen(ecdStore *sync.Map, box *settings.HeBox, prefix s
 		keys := make([]string, 0)
 		utils.GenKeysAtDepth(prefix, skippedDims, Dimentions, Kd, &keys)
 		tmpStorage := new(sync.Map)
-		filterChan := make(chan struct{}, runtime.NumCPU())
-		for i := 0; i < runtime.NumCPU(); i++ {
+		filterChan := make(chan struct{}, CPUS)
+		for i := 0; i < CPUS; i++ {
 			filterChan <- struct{}{}
 		}
 		for _, key := range keys {
@@ -391,9 +392,9 @@ func (PS *PIRServer) AnswerGen(ecdStore *sync.Map, box *settings.HeBox, prefix s
 	}
 
 	//spawnMultipliers
-	taskCh := make(chan multiplierTask, runtime.NumCPU())
+	taskCh := make(chan multiplierTask, CPUS)
 
-	for i := 0; i < runtime.NumCPU(); i++ { //runtime.NumCPU()
+	for i := 0; i < CPUS; i++ { //runtime.NumCPU()
 		wg.Add(1)
 		go func() {
 			defer wg.Done()

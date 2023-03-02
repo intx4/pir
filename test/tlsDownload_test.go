@@ -47,7 +47,7 @@ func TestDownload(t *testing.T) {
 		{"Test30_25", 30, (1 << 25)},
 		{"Test30_22", 30, (1 << 22)},
 		{"Test30_20", 30, (1 << 20)},
-		{"Test30_16", 30, (1 << 16)},
+		{"Test30_18", 30, (1 << 18)},
 	}
 	csvFile := new(os.File)
 	var err error
@@ -70,10 +70,11 @@ func TestDownload(t *testing.T) {
 			fileSize := float64(tc.size * tc.entries)
 			file := RandByteString(int(fileSize))
 			for i := range DLSpeeds {
-				dl := DLSpeeds[i] * 1024 //to Kbps
+				dl := 1000 * (DLSpeeds[i] / Mb) //to Kbps
 				latencyOpts := &latency.Network{
-					Kbps: int(dl),
-					MTU:  1500,
+					Kbps:    int(dl),
+					MTU:     1500,
+					Latency: 50 * time.Millisecond,
 				}
 
 				// Create server
