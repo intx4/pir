@@ -7,6 +7,7 @@ import (
 	"encoding/csv"
 	"encoding/json"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"google.golang.org/grpc/benchmark/latency"
 	"io"
 	"log"
@@ -30,25 +31,19 @@ import (
 var Mb = 1048576.0
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 16, 1 << 20, 1 << 25} //, 1 << 24, 1 << 20, 1 << 16}
-var Sizes = []int{30 * 8, 288 * 8, 1000 * 8}         //bits
+var ListOfEntries = []int{1 << 16, 1 << 18, 1 << 20, 1 << 25}
+var Sizes = []int{30 * 8, 288 * 8, 1000 * 8} //bits
 
 // from TS 22.261 table 7.1-1
-var DLSpeeds = []float64{(15.0) * Mb, (25.0) * Mb, (50.0) * Mb, (300.0) * Mb}
-var ULSpeeds = []float64{(10.0) * Mb, (50.0) * Mb, (25.0) * Mb, (50.0) * Mb}
+var DLSpeeds = []float64{(10.0) * Mb, (25.0) * Mb, (50.0) * Mb, (300.0) * Mb}
 
-func testDownloadTLS(t *testing.T, db map[string][]byte, entries, size, dl float64) float64 {
+func testDownloadTLS(t *testing.T, entries, size, dl float64) float64 {
 	latencyOpts := &latency.Network{
-		Kbps: int(dl),
-		MTU:  1500,
+		Kbps:    int(dl/Mb) * 1000,
+		Latency: 50 * time.Millisecond,
+		MTU:     1500,
 	}
-	file := make([]byte, 0)
-	for _, v := range db {
-		file = append(file, v...)
-	}
-	if len(file) != int(entries*(size/8)) {
-		t.Fatalf("Content is not of expected len")
-	}
+	file := RandByteString(int(math.Ceil(entries * size / 8)))
 
 	// Create server
 	server := &http.Server{
@@ -100,7 +95,7 @@ func testDownloadTLS(t *testing.T, db map[string][]byte, entries, size, dl float
 	}
 
 	// download the file from the server
-	fmt.Println("Client retrieving file of size (GB):", len(file)/1e9)
+	fmt.Println("Client retrieving file of size (GB):", float64(len(file))/1e9)
 	time.Sleep(1 * time.Second)
 	start := time.Now()
 	resp, err := client.Get("https://" + serverAddr)
@@ -112,17 +107,27 @@ func testDownloadTLS(t *testing.T, db map[string][]byte, entries, size, dl float
 	if err != nil {
 		log.Fatal(err)
 	}
-	if len(body) < int(len(file)) {
+	if len(body) < len(file) {
 		t.Fatalf("body if less then file")
 	}
 	end := time.Since(start).Seconds()
-	records := fmt.Sprintf("Entries=%f, Size=%f, Time=%f, BW=%f", entries, size/8, end, (dl/1024)/Mb)
+	records := fmt.Sprintf("Entries=%f, Size=%f, Time=%f, BW (Mb)=%f", entries, size/8, end, (dl)/Mb)
 	log.Println(records)
 	server.Close()
 	return end
 }
 
 func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivate bool, leakage int, brokenParams *map[string]struct{}) {
+	logger := logrus.New()
+
+	// Set the output to os.Stdout
+	logger.Out = os.Stdout
+
+	// Set the formatter to include colors
+	logger.Formatter = &logrus.TextFormatter{
+		ForceColors: true,
+	}
+
 	csvFile := new(os.File)
 	var err error
 	skipHeader := false
@@ -143,7 +148,7 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 
 	defer csvFile.Close()
 
-	headers := []string{"entries", "size", "dimentions", "N", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "DL", "UL", "leakedBits", "informationBits"}
+	headers := []string{"entries", "size", "dimentions", "N", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "withTLS", "DL", "UL", "leakedBits", "informationBits"}
 	if !skipHeader {
 		csvW.Write(headers)
 	}
@@ -313,12 +318,18 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						queryNoEvtKeysUploadCost := float64(querySizeNoEvtKeys*8) / DLSpeed
 						downloadCost := float64(answerSize*8) / DLSpeed
 						privacyBits := math.Log2(float64(entries)) - leakedBits
-						//baseLine := ((math.Pow(2.0, privacyBits))*float64(size))/DLSpeed + (64.0 / DLSpeed) //index int64
-						baseLine := testDownloadTLS(t, db, math.Pow(2.0, privacyBits), float64(size), DLSpeed)
-						onlineTime := queryGenTime + answerGenTime + answerGetTime + queryUploadCost + downloadCost
-						onlineTimeNoKeys := onlineTime - queryUploadCost + queryNoEvtKeysUploadCost
+						baseLine := ((math.Pow(2.0, privacyBits))*float64(size))/DLSpeed + (64.0 / DLSpeed) //index int64
+						withTLS := 0
+						if baseLine <= 60*10.0 && false {
+							log.Println("Testing with TLS")
+							baseLine = testDownloadTLS(t, math.Pow(2.0, privacyBits), float64(size), DLSpeed)
+							withTLS = 1
+						}
+						//add 50ms of latency
+						onlineTime := queryGenTime + answerGenTime + answerGetTime + queryUploadCost + downloadCost + 2.0*(50.0/1000.0)
+						onlineTimeNoKeys := onlineTime - queryUploadCost + queryNoEvtKeysUploadCost + 2.0*(50.0/1000.0)
 						//{"entries", "size", "dimentions", "LogN", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "leakedBits", "informationBits"}
-						records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %d, %d, %f, %d, %f, %f, %f, %f,%f, %f, %f, %f", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, querySize, querySizeNoEvtKeys, answerGenTime, answerSize, answerGetTime, onlineTime, onlineTimeNoKeys, baseLine, DLSpeed/Mb, DLSpeed/Mb, leakedBits, math.Log2(float64(entries)))
+						records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %d, %d, %f, %d, %f, %f, %f, %f, %d, %f, %f, %f, %f", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, querySize, querySizeNoEvtKeys, answerGenTime, answerSize, answerGetTime, onlineTime, onlineTimeNoKeys, baseLine, withTLS, DLSpeed/Mb, DLSpeed/Mb, leakedBits, math.Log2(float64(entries)))
 						err = csvW.Write(strings.Split(records, ","))
 						if err != nil {
 							t.Logf(err.Error())
@@ -328,7 +339,13 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						if err != nil {
 							t.Logf(err.Error())
 						}
-						log.Println(records)
+						if onlineTime < baseLine {
+							logger.Info(records)
+						} else if onlineTimeNoKeys < baseLine {
+							logger.Warn(records)
+						} else {
+							logger.Error(records)
+						}
 					}
 				}
 			}
@@ -347,7 +364,7 @@ func TestClientRetrieval(t *testing.T) {
 		leakage       int
 	}{
 		//{"No Expansion", DIR + "pirGo.csv", false, false, pir.NONELEAKAGE},
-		{"Expansion", DIR + "pirGoExpTLS.csv", true, false, messages.NONELEAKAGE},
+		{"Expansion", DIR + fmt.Sprintf("pirGoExp_%dcore.csv", Server.CPUS), true, false, messages.NONELEAKAGE},
 		{"WPIR STD", DIR + "pirGoWPTLS.csv", true, true, messages.STANDARDLEAKAGE},
 		{"WPIR HIGH", DIR + "pirGoWPTLS.csv", true, true, messages.HIGHLEAKAGE},
 	}
@@ -364,3 +381,5 @@ func TestClientRetrieval(t *testing.T) {
 		brokenParams = make(map[string]struct{})
 	}
 }
+
+//testing our context
