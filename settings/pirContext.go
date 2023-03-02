@@ -52,7 +52,7 @@ func NewPirContext(Items int, Size int, N int, Dimentions int) (*PirContext, err
 		for maxIter > 0 {
 			n := math.Floor(math.Pow(float64(Items), 1/exp)) //items >> bins*(log bins)^3
 			ka := float64(Items)/n + math.Sqrt((2.0*float64(Items)*math.Log(n)/n)*(1-((math.Log(math.Log(n)))/(alpha*2*math.Log(n)))))
-			if (float64(ctx.MaxBinSize)*tollerance-ka) <= 15.0*float64(ctx.MaxBinSize)/100 && ((float64(ctx.MaxBinSize) * tollerance) >= ka) { //must be close to Maxbinsize*tollerance. Also not less than 15% of MaxBinSize unused
+			if (float64(ctx.MaxBinSize)*tollerance-ka) <= 5.0*float64(ctx.MaxBinSize)/100 && ((float64(ctx.MaxBinSize) * tollerance) >= ka) { //must be close to Maxbinsize*tollerance: not less than 5% of MaxBinSize unused
 				ctx.ExpBinSize = int(math.Ceil(ka))
 				ctx.K, ctx.Kd = RoundUpToDim(n, Dimentions)
 				if ctx.Kd > N {

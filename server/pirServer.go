@@ -300,13 +300,21 @@ func (PS *PIRServer) cache() {
 func (S *PIRDBStorage) checkContext() {
 	var err error
 	utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash(), "actual items": S.Items, "configured items": S.Context.Items}).Info("Checking context")
+	if S.Context.Items > S.Items && S.Items < DEFAULTSTARTITEMS {
+		utils.Logger.WithFields(logrus.Fields{"service": "PIR"}).Warn("Skipping resize, too few items")
+		return
+	}
 	if S.Context.Items <= S.Items {
+		items := S.Items
+		if items < DEFAULTSTARTITEMS {
+			items = DEFAULTSTARTITEMS / 2
+		}
 		//bigger context needed
 		n := DEFAULTN
-		if S.Items > 1<<20 {
+		if items > 1<<20 {
 			n = 1 << 14
 		}
-		S.Context, err = settings.NewPirContext(S.Items*2, DEFAULTSIZE, n, DEFAULTDIMS)
+		S.Context, err = settings.NewPirContext(items*2, DEFAULTSIZE, n, DEFAULTDIMS)
 		if err != nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Info("Error while enlarging DB")
 			panic(err)
@@ -314,11 +322,15 @@ func (S *PIRDBStorage) checkContext() {
 		utils.Logger.WithFields(logrus.Fields{"service": "PIR", "contextHash": S.Context.Hash()}).Info("Changing to bigger DB representation")
 		S.reEncode()
 	} else if S.Context.Items > 2*S.Items {
+		items := S.Items
+		if items < DEFAULTSTARTITEMS {
+			items = DEFAULTSTARTITEMS
+		}
 		n := DEFAULTN
-		if S.Items > 1<<20 {
+		if items > 1<<20 {
 			n = 1 << 14
 		}
-		S.Context, err = settings.NewPirContext(S.Items, DEFAULTSIZE, n, DEFAULTDIMS)
+		S.Context, err = settings.NewPirContext(items, DEFAULTSIZE, n, DEFAULTDIMS)
 		if err != nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "PIR", "error": err.Error()}).Info("Error while shrinking DB")
 			panic(err)
