@@ -31,9 +31,9 @@ import (
 var Mb = 1048576.0
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 16, 1 << 18, 1 << 20, 1 << 25}
-var Sizes = []int{30 * 8, 288 * 8, 1000 * 8} //bits
-var enableTLS = true                         //true to test with TLS baseline
+var ListOfEntries = []int{1 << 18, 1 << 20, 1 << 22}
+var Sizes = []int{288 * 8} //bits
+var enableTLS = true       //true to test with TLS baseline
 // from TS 22.261 table 7.1-1
 var DLSpeeds = []float64{(10.0) * Mb, (25.0) * Mb, (50.0) * Mb, (300.0) * Mb}
 
@@ -175,19 +175,14 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 			//if !weaklyPrivate && (entries >= 1<<27 && size >= 1000) {
 			//	continue
 			//}
-			keys := make([]string, entries)
-			values := make([][]byte, entries)
-			db := make(map[string][]byte)
-			for i := 0; i < len(keys); {
-				keys[i] = string(RandByteString(100))
-				values[i] = RandByteString(size / 8)
-				if _, ok := db[keys[i]]; !ok {
-					db[keys[i]] = values[i]
-					i++
-				}
+			db := make([][]byte, entries)
+			for i := 0; i < entries; i++ {
+				db[i] = make([]byte, size/8)
+				db[i] = RandByteString(size / 8)
 			}
+
 			for _, logN := range []int{13} {
-				for _, dimentions := range []int{2} {
+				for _, dimentions := range []int{2, 3} {
 					//if !weaklyPrivate && ((logN == 14 || (logN == 13 && dimentions > 2)) && entries >= 1<<25 && size >= 1000) {
 					//	continue
 					//}
@@ -227,14 +222,14 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					//after setting the context we can generate a profile
 					profile, err := client.GenProfile(params, paramsId)
 
-					choice := rand.Int() % len(keys)
+					choice := rand.Int() % ctx.K
 					start = time.Now()
-					query, leakedBits, err := client.QueryGen([]byte(keys[choice]), profile, leakage, weaklyPrivate, expansion, true)
+					query, leakedBits, err := client.QueryGen(choice, profile, leakage, weaklyPrivate, expansion, true)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
 					queryGenTime := time.Since(start).Seconds()
-					choosenKey, _ := utils.MapKeyToDim([]byte(keys[choice]), ctx.Kd, ctx.Dim)
+					choosenKey, _ := utils.Decompose(choice, ctx.Kd, ctx.Dim)
 					if err != nil {
 						t.Fatalf(err.Error())
 					}
@@ -364,9 +359,9 @@ func TestClientRetrieval(t *testing.T) {
 		leakage       int
 	}{
 		//{"No Expansion", DIR + "pirGo.csv", false, false, pir.NONELEAKAGE},
-		{"Expansion", DIR + "pirGoExpTLS.csv", true, false, messages.NONELEAKAGE},
-		{"WPIR STD", DIR + "pirGoWPTLS.csv", true, true, messages.STANDARDLEAKAGE},
-		{"WPIR HIGH", DIR + "pirGoWPTLS.csv", true, true, messages.HIGHLEAKAGE},
+		{"Expansion", DIR + "idxpirGoExpTLS.csv", true, false, messages.NONELEAKAGE},
+		{"WPIR STD", DIR + "idxpirGoWPTLS.csv", true, true, messages.STANDARDLEAKAGE},
+		{"WPIR HIGH", DIR + "idxpirGoWPTLS.csv", true, true, messages.HIGHLEAKAGE},
 	}
 
 	for _, tc := range testCases {

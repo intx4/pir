@@ -127,3 +127,11 @@ func TestGenKeysAtDepth(t *testing.T) {
 	utils.GenKeysAtDepth("1|1", 2, 4, 4, &keys)
 	fmt.Println(keys)
 }
+
+func TestDecompose(t *testing.T) {
+	k := 25
+	kd := 3
+	dim := 3
+	s, _ := utils.Decompose(k, kd, dim)
+	print(s)
+}

@@ -96,55 +96,30 @@ type PIRServer struct {
 	Context  *settings.PirContext
 }
 
-func NewPirServer(ctx *settings.PirContext, db map[string][]byte) (*PIRServer, error) {
+func NewPirServer(ctx *settings.PirContext, db [][]byte) (*PIRServer, error) {
 	PS := new(PIRServer)
 	PS.Profiles = make(map[string]map[string]*settings.PIRProfileSet)
-	K, Kd, dimentions := ctx.K, ctx.Kd, ctx.Dim
-	maxCollisions := 0
-	l := 0
-	for _, v := range db {
-		l = len(v)
-		break
+	K, Kd := ctx.K, ctx.Kd
+
+	//pad
+	for len(db) < K*ctx.MaxBinSize {
+		b := make([]byte, len(db[0])/8)
+		for i := 0; i < len(b); i++ {
+			b[i] = []byte("A")[0]
+		}
+		db = append(db, b)
 	}
-	tooBigErr := ""
 
 	ecdStorage := new(sync.Map)
-	var wg sync.WaitGroup
-	pool := CPUS
-	poolCh := make(chan struct{}, pool)
-	//errCh := make(chan error)
-	//init pool chan
-	for i := 0; i < pool; i++ {
-		poolCh <- struct{}{}
-	}
-	for key, value := range db {
-		if len(value) != l {
-			return nil, errors.New(fmt.Sprintf("Not uniform byte length for records: Had %d and now %d", l, len(value)))
-		}
-		k, _ := utils.MapKeyToDim([]byte(key), Kd, dimentions)
-		<-poolCh
-		wg.Add(1)
-		go func(key string, value []byte) {
-			defer wg.Done()
-			if e, ok := ecdStorage.LoadOrStore(key, NewPirDBEntry(value)); ok {
-				//update
-				collisions, err := e.(*PIRDBEntry).Update(value, ctx.MaxBinSize)
-				if err != nil {
-					tooBigErr = err.Error()
-				}
-				if collisions+1 > maxCollisions {
-					maxCollisions = collisions + 1
-				}
+	for dbIdx := 0; dbIdx < len(db)/ctx.MaxBinSize; dbIdx++ {
+		bin := db[dbIdx*ctx.MaxBinSize : dbIdx*ctx.MaxBinSize+ctx.MaxBinSize]
+		hcIdx, _ := utils.Decompose(dbIdx, Kd, ctx.Dim)
+		for _, b := range bin {
+			if entry, loaded := ecdStorage.LoadOrStore(hcIdx, NewPirDBEntry(b)); loaded {
+				entry.(*PIRDBEntry).Update(b, ctx.MaxBinSize)
 			}
-			poolCh <- struct{}{}
-		}(k, value)
+		}
 	}
-	wg.Wait()
-	log.Println()
-	if tooBigErr != "" {
-		fmt.Println("	" + tooBigErr)
-	}
-	fmt.Printf("		Storage encoded in chunks :\n		Max size of bucket registered = %d / Expected %d --> Max bucket capacity = %d\n		Tot Keys: %d\n", maxCollisions, ctx.ExpBinSize, ctx.MaxBinSize, K)
 
 	PS.Store = ecdStorage
 	PS.Context = ctx

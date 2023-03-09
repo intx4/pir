@@ -9,6 +9,7 @@ import (
 	"math"
 	"math/big"
 	"strconv"
+	"strings"
 )
 
 var PAD_PREFIX string = "10011111001"
@@ -287,4 +288,34 @@ func FormatParams(params bfv.Parameters) string {
 
 func FormatSizeForHyperCube(items, size, logN, dimentions int) string {
 	return strconv.FormatInt(int64(items), 10) + "|" + strconv.FormatInt(int64(size), 10) + "|" + strconv.FormatInt(int64(logN), 10) + "|" + strconv.FormatInt(int64(dimentions), 10)
+}
+func Decompose(n int, d int, k int) (string, []int) {
+	if n == 0 {
+		return strings.Repeat("0|", k-1) + "0", make([]int, k)
+	}
+	baseNDash1 := make([]int, 0)
+	for n > 0 {
+		r := n % (d)
+		baseNDash1 = append(baseNDash1, r)
+		n = n / (d)
+	}
+	for len(baseNDash1) < k {
+		baseNDash1 = append(baseNDash1, 0)
+	}
+	reverse(baseNDash1)
+	return strings.Join(intSliceToStringSlice(baseNDash1, "|"), "|"), baseNDash1
+}
+
+func reverse(arr []int) {
+	for i, j := 0, len(arr)-1; i < j; i, j = i+1, j-1 {
+		arr[i], arr[j] = arr[j], arr[i]
+	}
+}
+
+func intSliceToStringSlice(arr []int, sep string) []string {
+	res := make([]string, len(arr))
+	for i, v := range arr {
+		res[i] = strconv.Itoa(v)
+	}
+	return res
 }

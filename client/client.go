@@ -116,7 +116,7 @@ Currently only queries with expansion set to true and compressed set to true are
 This will represent the query with one ciphertext per hypercube dimention (which will be then obliviously expanded at the server)
 and each ciphertext will be compressed in one polynomial instead of two
 */
-func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage int, weaklyPrivate, expansion, compressed bool) (*messages.PIRQuery, float64, error) {
+func (PC *PIRClient) QueryGen(key int, profile *settings.PIRProfile, leakage int, weaklyPrivate, expansion, compressed bool) (*messages.PIRQuery, float64, error) {
 	//new seeded prng
 	ctx := PC.Context
 	seed := rand.Int63n(1<<63 - 1)
@@ -156,7 +156,7 @@ func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage 
 		leakedBits = (s / float64(ctx.Dim)) * math.Log2(float64(ctx.K))
 		q.Q.Compressed, q.Prefix, err = PC.wpQueryGen(key, ctx.Kd, ctx.Dim, int(s), box)
 	}
-	keyInDb, _ := utils.MapKeyToDim(key, PC.Context.Kd, PC.Context.Dim)
+	keyInDb, _ := utils.Decompose(key, ctx.Kd, ctx.Dim)
 	if profile.KnownByServer {
 		q.Profile = &settings.PIRProfile{
 			ParamsId:    profile.ParamsId,
@@ -170,19 +170,19 @@ func (PC *PIRClient) QueryGen(key []byte, profile *settings.PIRProfile, leakage 
 			ContextHash: profile.ContextHash,
 		}
 	}
-	utils.Logger.WithFields(logrus.Fields{"service": "client", "key": string(key), "DB pos": keyInDb, "leak": leakage}).Info("Generated Query")
+	utils.Logger.WithFields(logrus.Fields{"service": "client", "key": key, "DB pos": keyInDb, "leak": leakage}).Info("Generated Query")
 	return q, leakedBits, err
 }
 
 /*
 Generates no leakage query with no expansion required (high network cost)
 */
-func (PC *PIRClient) queryGen(key []byte, ctx settings.PirContext, box *settings.HeBox) ([][]*messages.PIRQueryItem, error) {
+func (PC *PIRClient) queryGen(key int, ctx settings.PirContext, box *settings.HeBox) ([][]*messages.PIRQueryItem, error) {
 	Kd, dimentions := ctx.Kd, ctx.Dim
 	if box.Ecd == nil || box.Enc == nil || box.Dec == nil {
 		return nil, errors.New("Client is not initialiazed with Encoder or Encryptor or Decryptor")
 	}
-	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
+	_, keys := utils.Decompose(key, ctx.Kd, ctx.Dim)
 	query := make([][]*messages.PIRQueryItem, dimentions)
 	for i, k := range keys {
 		queryOfDim := make([]*messages.PIRQueryItem, Kd)
@@ -209,12 +209,12 @@ func (PC *PIRClient) queryGen(key []byte, ctx settings.PirContext, box *settings
 /*
 Generates a compressed no leakage query (low network cost, expansion at server needed)
 */
-func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *settings.HeBox) ([]*messages.PIRQueryItem, error) {
+func (PC *PIRClient) compressedQueryGen(key int, Kd, dimentions int, box *settings.HeBox) ([]*messages.PIRQueryItem, error) {
 	if box.Ecd == nil || box.Enc == nil {
 		return nil, errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
 	//l := int(math.Ceil(float64(PC.Context.K) / float64(box.Params.N())))
-	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
+	_, keys := utils.Decompose(key, Kd, dimentions)
 	selectors := make([][]uint64, dimentions)
 
 	//gen selection vectors
@@ -241,12 +241,12 @@ func (PC *PIRClient) compressedQueryGen(key []byte, Kd, dimentions int, box *set
 /*
 Generates a variable leakage query (expansion needed at server, low network cost)
 */
-func (PC *PIRClient) wpQueryGen(key []byte, Kd, dimentions, dimToSkip int, box *settings.HeBox) ([]*messages.PIRQueryItem, string, error) {
+func (PC *PIRClient) wpQueryGen(key int, Kd, dimentions, dimToSkip int, box *settings.HeBox) ([]*messages.PIRQueryItem, string, error) {
 	if box.Ecd == nil || box.Enc == nil {
 		return nil, "", errors.New("Client is not initliazed with Encoder or Encryptor")
 	}
 	//l := int(math.Ceil(float64(PC.Context.K) / float64(box.Params.N())))
-	_, keys := utils.MapKeyToDim(key, Kd, dimentions)
+	_, keys := utils.Decompose(key, Kd, dimentions)
 	selectors := make([][]uint64, dimentions-dimToSkip)
 
 	//gen selection vectors

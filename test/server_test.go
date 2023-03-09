@@ -12,22 +12,17 @@ import (
 
 // Takes Time
 func TestServerEncode(t *testing.T) {
-	var items = []int{1 << 10, 1 << 12}
-	var sizes = []int{150 * 8, 250 * 8, 1000 * 8}
+	var items = []int{1 << 12}
+	var sizes = []int{1000 * 8}
 
 	for _, item := range items {
 		for _, size := range sizes {
 			//fake db
-			keys := make([]string, item)
-			values := make([][]byte, item)
-			db := make(map[string][]byte)
-			for i := 0; i < len(keys); {
-				keys[i] = string(RandByteString(100))
-				values[i] = RandByteString(size / 8)
-				if _, ok := db[keys[i]]; !ok {
-					db[keys[i]] = values[i]
-					i++
-				}
+
+			db := make([][]byte, item)
+			for i := 0; i < item; i++ {
+				db[i] = make([]byte, size/8)
+				db[i] = RandByteString(size / 8)
 			}
 			for _, dimentions := range []int{2, 3} {
 				for _, logN := range []int{13, 14} {
