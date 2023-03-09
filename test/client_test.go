@@ -33,7 +33,7 @@ var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
 var ListOfEntries = []int{1 << 16, 1 << 18, 1 << 20, 1 << 25}
 var Sizes = []int{30 * 8, 288 * 8, 1000 * 8} //bits
-
+var enableTLS = true                         //true to test with TLS baseline
 // from TS 22.261 table 7.1-1
 var DLSpeeds = []float64{(10.0) * Mb, (25.0) * Mb, (50.0) * Mb, (300.0) * Mb}
 
@@ -186,8 +186,8 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 					i++
 				}
 			}
-			for _, logN := range []int{14, 13} {
-				for _, dimentions := range []int{3, 2} {
+			for _, logN := range []int{13} {
+				for _, dimentions := range []int{2} {
 					//if !weaklyPrivate && ((logN == 14 || (logN == 13 && dimentions > 2)) && entries >= 1<<25 && size >= 1000) {
 					//	continue
 					//}
@@ -320,7 +320,7 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						privacyBits := math.Log2(float64(entries)) - leakedBits
 						baseLine := ((math.Pow(2.0, privacyBits))*float64(size))/DLSpeed + (64.0 / DLSpeed) //index int64
 						withTLS := 0
-						if baseLine <= 60*10.0 && false {
+						if baseLine <= 60*10.0 && enableTLS {
 							log.Println("Testing with TLS")
 							baseLine = testDownloadTLS(t, math.Pow(2.0, privacyBits), float64(size), DLSpeed)
 							withTLS = 1
@@ -364,7 +364,7 @@ func TestClientRetrieval(t *testing.T) {
 		leakage       int
 	}{
 		//{"No Expansion", DIR + "pirGo.csv", false, false, pir.NONELEAKAGE},
-		{"Expansion", DIR + fmt.Sprintf("pirGoExp_%dcore.csv", Server.CPUS), true, false, messages.NONELEAKAGE},
+		{"Expansion", DIR + "pirGoExpTLS.csv", true, false, messages.NONELEAKAGE},
 		{"WPIR STD", DIR + "pirGoWPTLS.csv", true, true, messages.STANDARDLEAKAGE},
 		{"WPIR HIGH", DIR + "pirGoWPTLS.csv", true, true, messages.HIGHLEAKAGE},
 	}

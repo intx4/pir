@@ -5,7 +5,7 @@ from numpy import log2
 from dataclasses import dataclass
 import pandas as pd
 
-fieldnames = ["entries", "size", "dimentions", "LogN", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "leakedBits", "informationBits"]
+fieldnames = ["entries", "size", "dimentions", "N", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "withTLS", "DL", "UL", "leakedBits", "informationBits"]
 
 class RecordsOfInstance:
     """
@@ -42,10 +42,10 @@ class Group:
         for record in records:
             self.records[record.label] = record.deepcopy()
 
-def read_csv(path : str,d=2, n = 8192):
+def read_csv(path : str,d=2, n = 13):
     df = pd.read_csv(path)
     df = df[df['d'] == d]
-    df = df[df['n'] == n]
+    df = df[df['N'] == n]
     db_sizes = df['entries'].unique()
     record_sizes = df['size'].unique()
     records_by_entries = []
