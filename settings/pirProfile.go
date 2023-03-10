@@ -1,6 +1,7 @@
 package settings
 
 import (
+	"encoding/json"
 	"github.com/tuneinsight/lattigo/v4/rlwe"
 )
 
@@ -21,4 +22,53 @@ type PIRProfileSet struct {
 
 func NewProfileSet() *PIRProfileSet {
 	return &PIRProfileSet{P: make(map[int]*PIRProfile)}
+}
+
+func (pf *PIRProfile) MarshalBinary() ([]byte, error) {
+	s := struct {
+		Rlk         []byte `json:"rlk,omitempty"`
+		Rtks        []byte `json:"rtks,omitempty"`
+		ParamsId    string `json:"paramsId"`
+		ContextHash string `json:"contextHash"`
+	}{
+		Rlk:         nil,
+		Rtks:        nil,
+		ContextHash: pf.ContextHash,
+		ParamsId:    pf.ParamsId,
+	}
+	s.Rtks, _ = pf.Rlk.MarshalBinary()
+	s.Rlk, _ = pf.Rtks.MarshalBinary()
+	b, err := json.Marshal(s)
+	if err != nil {
+		return nil, err
+	}
+	return b, nil
+}
+
+func (pf *PIRProfile) UnMarshalBinary(b []byte) error {
+	s := struct {
+		Rlk         []byte `json:"rlk,omitempty"`
+		Rtks        []byte `json:"rtks,omitempty"`
+		ParamsId    string `json:"paramsId"`
+		ContextHash string `json:"contextHash"`
+	}{
+		Rlk:         nil,
+		Rtks:        nil,
+		ParamsId:    "",
+		ContextHash: "",
+	}
+	err := json.Unmarshal(b, &s)
+	if err != nil {
+		return err
+	}
+	err = pf.Rlk.UnmarshalBinary(s.Rlk)
+	if err != nil {
+		return err
+	}
+	err = pf.Rtks.UnmarshalBinary(s.Rtks)
+	if err != nil {
+		return err
+	}
+	pf.ContextHash, pf.ParamsId = s.ContextHash, s.ParamsId
+	return nil
 }
