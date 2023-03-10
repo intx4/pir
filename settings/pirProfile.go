@@ -36,8 +36,10 @@ func (pf *PIRProfile) MarshalBinary() ([]byte, error) {
 		ContextHash: pf.ContextHash,
 		ParamsId:    pf.ParamsId,
 	}
-	s.Rtks, _ = pf.Rlk.MarshalBinary()
-	s.Rlk, _ = pf.Rtks.MarshalBinary()
+	if pf.Rlk != nil && pf.Rtks != nil {
+		s.Rlk, _ = pf.Rlk.MarshalBinary()
+		s.Rtks, _ = pf.Rtks.MarshalBinary()
+	}
 	b, err := json.Marshal(s)
 	if err != nil {
 		return nil, err
@@ -61,13 +63,15 @@ func (pf *PIRProfile) UnMarshalBinary(b []byte) error {
 	if err != nil {
 		return err
 	}
-	err = pf.Rlk.UnmarshalBinary(s.Rlk)
-	if err != nil {
-		return err
-	}
-	err = pf.Rtks.UnmarshalBinary(s.Rtks)
-	if err != nil {
-		return err
+	if s.Rlk != nil && s.Rtks != nil {
+		err = pf.Rlk.UnmarshalBinary(s.Rlk)
+		if err != nil {
+			return err
+		}
+		err = pf.Rtks.UnmarshalBinary(s.Rtks)
+		if err != nil {
+			return err
+		}
 	}
 	pf.ContextHash, pf.ParamsId = s.ContextHash, s.ParamsId
 	return nil
