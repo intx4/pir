@@ -31,7 +31,7 @@ import (
 var Mb = 1048576.0
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 18, 1 << 20, 1 << 22}
+var ListOfEntries = []int{1 << 10, 1 << 20, 1 << 22}
 var Sizes = []int{288 * 8} //bits
 var enableTLS = true       //true to test with TLS baseline
 // from TS 22.261 table 7.1-1
