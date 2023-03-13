@@ -21,6 +21,7 @@ import (
 	Server "pir/server"
 	"pir/settings"
 	"pir/utils"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -280,36 +281,43 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						fmt.Println(answerPt)
 						t.Fatalf("Answer does not match expected")
 					}
-
-					querySize := 0
-					querySizeNoEvtKeys := 0
-					if query.Q.Compressed != nil {
-						for _, q := range query.Q.Compressed {
-							bin, _ := q.MarshalBinary()
-							querySize += len(bin)
-							querySizeNoEvtKeys += len(bin)
-						}
-					} else if query.Q.Expanded != nil {
-						for _, Q := range query.Q.Expanded {
-							for _, q := range Q {
-								bin, _ := q.MarshalBinary()
-								querySize += len(bin)
-								querySizeNoEvtKeys += len(bin)
-							}
-						}
+					bin, err := query.MarshalBinary()
+					if err != nil {
+						t.Fatalf(err.Error())
 					}
-					bin, _ := query.Profile.Rlk.MarshalBinary()
-					querySize += len(bin)
-					bin, _ = query.Profile.Rtks.MarshalBinary()
-					querySize += len(bin)
+					querySize := len(bin)
+					query2 := new(messages.PIRQuery)
+					query2.UnMarshalBinary(bin)
+					if reflect.DeepEqual(query, query2) != true {
+						t.Fatalf("Query serialization error")
+					}
+					query.Profile.Rlk = nil
+					query.Profile.Rtks = nil
+					bin, err = query.MarshalBinary()
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					query2 = new(messages.PIRQuery)
+					query2.UnMarshalBinary(bin)
+					if reflect.DeepEqual(query, query2) != true {
+						t.Fatalf("Query serialization error")
+					}
+					querySizeNoEvtKeys := len(bin)
+					//bin, _ := query.Profile.Rlk.MarshalBinary()
+					//querySize += len(bin)
+					//bin, _ = query.Profile.Rtks.MarshalBinary()
+					//querySize += len(bin)
 
 					answerSize := 0
-					for _, a := range answer.Answer {
-						serialized, err := a.MarshalBinary()
-						answerSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
+					bin, err = answer.MarshalBinary()
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					answerSize = len(bin)
+					answer2 := new(messages.PIRAnswer)
+					answer2.UnMarshalBinary(bin)
+					if reflect.DeepEqual(answer, answer2) != true {
+						t.Fatalf("Answer serialization error")
 					}
 					for i := 0; i < len(DLSpeeds); i++ {
 						DLSpeed := DLSpeeds[i]
