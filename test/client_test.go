@@ -31,9 +31,9 @@ import (
 var Mb = 1048576.0
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 22}           //, 1 << 18, 1 << 20, 1 << 25}
+var ListOfEntries = []int{1 << 16, 1 << 22, 1 << 25}
 var Sizes = []int{30 * 8, 288 * 8, 1000 * 8} //bits
-var enableTLS = false                        //true to test with TLS baseline
+var enableTLS = true                         //true to test with TLS baseline
 // from TS 22.261 table 7.1-1
 var DLSpeeds = []float64{(10.0) * Mb, (25.0) * Mb, (50.0) * Mb, (300.0) * Mb}
 
@@ -187,7 +187,7 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 				}
 			}
 			for _, logN := range []int{13} {
-				for _, dimentions := range []int{2, 3} {
+				for _, dimentions := range []int{3} {
 					//if !weaklyPrivate && ((logN == 14 || (logN == 13 && dimentions > 2)) && entries >= 1<<25 && size >= 1000) {
 					//	continue
 					//}
@@ -373,7 +373,7 @@ func TestClientRetrieval(t *testing.T) {
 		//{"No Expansion", DIR + "pirGo.csv", false, false, pir.NONELEAKAGE},
 		{"Expansion", DIR + "pirGoExpTLS.csv", true, false, messages.NONELEAKAGE},
 		{"WPIR STD", DIR + "pirGoWPTLS.csv", true, true, messages.STANDARDLEAKAGE},
-		{"WPIR HIGH", DIR + "pirGoWPTLS.csv", true, true, messages.HIGHLEAKAGE},
+		{"WPIR HIGH", DIR + "pirGoWP2TLS.csv", true, true, messages.HIGHLEAKAGE},
 	}
 
 	for _, tc := range testCases {
