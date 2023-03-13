@@ -431,10 +431,10 @@ func (PS *PIRServer) AnswerGen(ecdStore *sync.Map, box *settings.HeBox, prefix s
 		ecdStore = new(sync.Map) //we transform ecdStore into a PIRStorage after first iter to reduce memory
 		nextStore.Range(func(key, value any) bool {
 			for _, ct := range value.(*PIREntry).Ops {
-				if d != 0 && ct.Degree() > 1 {
-					//after first we have done a ct x pt -> deg is still 1
-					evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
-				}
+				//if d != 0 && ct.Degree() > 1 {
+				//	//after first we have done a ct x pt -> deg is still 1
+				//	evt.Relinearize(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
+				//}
 				if finalRound && key == "" {
 					for ct.(*rlwe.Ciphertext).Level() != 0 {
 						evt.Rescale(ct.(*rlwe.Ciphertext), ct.(*rlwe.Ciphertext))
@@ -489,9 +489,9 @@ func spawnMultiplier(evt bfv.Evaluator, ecd bfv.Encoder, params bfv.Parameters, 
 		intermediateResult := make([]rlwe.Operand, 0)
 		for _, op := range values {
 			el := evt.MulNew(task.Query, op)
-			//if el.Degree() > 1 {
-			//	evt.Relinearize(el, el)
-			//}
+			if el.Degree() > 1 {
+				evt.Relinearize(el, el)
+			}
 			intermediateResult = append(intermediateResult, el)
 		}
 		//compress (accumulate result with lazy modswitch and relin) atomically

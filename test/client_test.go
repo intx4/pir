@@ -21,6 +21,7 @@ import (
 	Server "pir/server"
 	"pir/settings"
 	"pir/utils"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -32,7 +33,7 @@ import (
 var Mb = 1048576.0
 var DEBUG = true
 var DIR = os.ExpandEnv("$HOME/pir/test/data/")
-var ListOfEntries = []int{1 << 10, 1 << 20, 1 << 22}
+var ListOfEntries = []int{1 << 18, 1 << 20, 1 << 22}
 var Sizes = []int{288 * 8} //bits
 var enableTLS = true       //true to test with TLS baseline
 // from TS 22.261 table 7.1-1
@@ -300,11 +301,21 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						t.Fatalf(err.Error())
 					}
 					querySize = len(bin)
+					query2 := new(messages.PIRQuery)
+					query2.UnMarshalBinary(bin)
+					if reflect.DeepEqual(query, query2) != true {
+						t.Fatalf("Query serialization error")
+					}
 					query.Profile.Rlk = nil
 					query.Profile.Rtks = nil
 					bin, err = query.MarshalBinary()
 					if err != nil {
 						t.Fatalf(err.Error())
+					}
+					query2 = new(messages.PIRQuery)
+					query2.UnMarshalBinary(bin)
+					if reflect.DeepEqual(query, query2) != true {
+						t.Fatalf("Query serialization error")
 					}
 					querySizeNoEvtKeys = len(bin)
 					//bin, _ := query.Profile.Rlk.MarshalBinary()
@@ -318,6 +329,11 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						t.Fatalf(err.Error())
 					}
 					answerSize = len(bin)
+					answer2 := new(messages.PIRAnswer)
+					answer2.UnMarshalBinary(bin)
+					if reflect.DeepEqual(answer, answer2) != true {
+						t.Fatalf("Answer serialization error")
+					}
 					//for _, a := range answer.Answer {
 					//	serialized, err := a.MarshalBinary()
 					//	answerSize += len(serialized)

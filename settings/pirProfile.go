@@ -64,10 +64,12 @@ func (pf *PIRProfile) UnMarshalBinary(b []byte) error {
 		return err
 	}
 	if s.Rlk != nil && s.Rtks != nil {
+		pf.Rlk = new(rlwe.RelinearizationKey)
 		err = pf.Rlk.UnmarshalBinary(s.Rlk)
 		if err != nil {
 			return err
 		}
+		pf.Rtks = new(rlwe.RotationKeySet)
 		err = pf.Rtks.UnmarshalBinary(s.Rtks)
 		if err != nil {
 			return err
