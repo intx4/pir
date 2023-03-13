@@ -24,6 +24,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -279,34 +280,51 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 
 					querySize := 0
 					querySizeNoEvtKeys := 0
-					if query.Q.Compressed != nil {
-						for _, q := range query.Q.Compressed {
-							bin, _ := q.MarshalBinary()
-							querySize += len(bin)
-							querySizeNoEvtKeys += len(bin)
-						}
-					} else if query.Q.Expanded != nil {
-						for _, Q := range query.Q.Expanded {
-							for _, q := range Q {
-								bin, _ := q.MarshalBinary()
-								querySize += len(bin)
-								querySizeNoEvtKeys += len(bin)
-							}
-						}
+					//if query.Q.Compressed != nil {
+					//	for _, q := range query.Q.Compressed {
+					//		bin, _ := q.MarshalBinary()
+					//		querySize += len(bin)
+					//		querySizeNoEvtKeys += len(bin)
+					//	}
+					//} else if query.Q.Expanded != nil {
+					//	for _, Q := range query.Q.Expanded {
+					//		for _, q := range Q {
+					//			bin, _ := q.MarshalBinary()
+					//			querySize += len(bin)
+					//			querySizeNoEvtKeys += len(bin)
+					//		}
+					//	}
+					//}
+					bin, err := query.MarshalBinary()
+					if err != nil {
+						t.Fatalf(err.Error())
 					}
-					bin, _ := query.Profile.Rlk.MarshalBinary()
-					querySize += len(bin)
-					bin, _ = query.Profile.Rtks.MarshalBinary()
-					querySize += len(bin)
+					querySize = len(bin)
+					query.Profile.Rlk = nil
+					query.Profile.Rtks = nil
+					bin, err = query.MarshalBinary()
+					if err != nil {
+						t.Fatalf(err.Error())
+					}
+					querySizeNoEvtKeys = len(bin)
+					//bin, _ := query.Profile.Rlk.MarshalBinary()
+					//querySize += len(bin)
+					//bin, _ = query.Profile.Rtks.MarshalBinary()
+					//querySize += len(bin)
 
 					answerSize := 0
-					for _, a := range answer.Answer {
-						serialized, err := a.MarshalBinary()
-						answerSize += len(serialized)
-						if err != nil {
-							t.Fatalf(err.Error())
-						}
+					bin, err = answer.MarshalBinary()
+					if err != nil {
+						t.Fatalf(err.Error())
 					}
+					answerSize = len(bin)
+					//for _, a := range answer.Answer {
+					//	serialized, err := a.MarshalBinary()
+					//	answerSize += len(serialized)
+					//	if err != nil {
+					//		t.Fatalf(err.Error())
+					//	}
+					//}
 					for i := 0; i < len(DLSpeeds); i++ {
 						DLSpeed := DLSpeeds[i]
 						queryUploadCost := float64(querySize*8) / DLSpeed
@@ -377,4 +395,49 @@ func TestClientRetrieval(t *testing.T) {
 	}
 }
 
-//testing our context
+// Simple test for concurrency performance
+func TestConcurrency(t *testing.T) {
+	testCases := []struct {
+		numCPUs int
+	}{
+		{numCPUs: 16},
+		{numCPUs: 32},
+		{numCPUs: 64},
+		{numCPUs: 128},
+	}
+	for _, tc := range testCases {
+		t.Run(fmt.Sprintf("Cores: %d", tc.numCPUs), func(t *testing.T) {
+			poolCh := make(chan struct{}, tc.numCPUs)
+			for i := 0; i < tc.numCPUs; i++ {
+				poolCh <- struct{}{}
+			}
+			feedback := make(chan int, 1<<10)
+			work := func(feedback chan int) {
+				for i := 0; i < 1<<24; i++ {
+					i += 0
+				}
+				feedback <- 1
+			}
+
+			sum := 0
+
+			var wg sync.WaitGroup
+
+			start := time.Now()
+			for i := 0; i < 1<<10; i++ {
+				<-poolCh
+				wg.Add(1)
+				go func(feedback chan int) {
+					defer wg.Done()
+					work(feedback)
+					poolCh <- struct{}{}
+				}(feedback)
+			}
+			wg.Wait()
+			for sum < 1<<10 {
+				sum += <-feedback
+			}
+			log.Printf("Cores %d: time (micros) %d", tc.numCPUs, time.Since(start).Microseconds())
+		})
+	}
+}
