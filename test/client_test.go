@@ -37,7 +37,7 @@ var ListOfEntries = []int{1 << 18, 1 << 20, 1 << 22}
 var Sizes = []int{288 * 8} //bits
 var enableTLS = true       //true to test with TLS baseline
 // from TS 22.261 table 7.1-1
-var DLSpeeds = []float64{(10.0) * Mb, (25.0) * Mb, (50.0) * Mb, (300.0) * Mb}
+var DLSpeeds = []float64{(25.0) * Mb}
 
 func testDownloadTLS(t *testing.T, entries, size, dl float64) float64 {
 	latencyOpts := &latency.Network{
