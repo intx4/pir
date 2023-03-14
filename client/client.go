@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"github.com/sirupsen/logrus"
 	"github.com/tuneinsight/lattigo/v4/bfv"
@@ -473,7 +472,7 @@ func (PC *PIRClient) SendQuery(query *messages.PIRQuery, address string) (*messa
 	defer conn.Close()
 
 	client := pb.NewProxyClient(conn)
-	data, err := json.Marshal(query)
+	data, err := query.MarshalBinary()
 	if err != nil {
 		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Json Encode Error")
 		return nil, err
@@ -495,7 +494,7 @@ func (PC *PIRClient) SendQuery(query *messages.PIRQuery, address string) (*messa
 			return nil, err
 		}
 		pirAnswer := &messages.PIRAnswer{}
-		err = json.Unmarshal(answerDec, pirAnswer)
+		err = pirAnswer.UnMarshalBinary(answerDec)
 		if err != nil {
 			log.Println(err)
 			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Json Decode Error")

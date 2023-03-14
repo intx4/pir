@@ -4,7 +4,6 @@ package server
 import (
 	"context"
 	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/sirupsen/logrus"
@@ -174,7 +173,7 @@ func (I *ICF) Query(ctx context.Context, request *pb.InternalRequest) (*pb.Inter
 			Ok:           false,
 		}
 	} else {
-		err = json.Unmarshal(data, pirQuery)
+		err = pirQuery.UnMarshalBinary(data)
 		if err != nil {
 			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error Unmarshaling pirQuery")
 			pirAnswer = &messages.PIRAnswer{
@@ -239,7 +238,7 @@ func (I *ICF) Query(ctx context.Context, request *pb.InternalRequest) (*pb.Inter
 			}
 		}
 	}
-	data, err = json.Marshal(pirAnswer)
+	data, err = pirAnswer.MarshalBinary()
 	if err != nil {
 		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Error")
 		return nil, err
