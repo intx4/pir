@@ -30,9 +30,11 @@ func (A *PIRAnswer) MarshalBinary() ([]byte, error) {
 		Error:        A.Error,
 		Ok:           A.Ok,
 	}
-	s.Answer = make([][]byte, len(A.Answer))
-	for i, a := range A.Answer {
-		s.Answer[i], _ = a.MarshalBinary()
+	if s.Answer != nil {
+		s.Answer = make([][]byte, len(A.Answer))
+		for i, a := range A.Answer {
+			s.Answer[i], _ = a.MarshalBinary()
+		}
 	}
 	return json.Marshal(s)
 }
@@ -54,12 +56,14 @@ func (A *PIRAnswer) UnMarshalBinary(b []byte) error {
 	if err != nil {
 		return err
 	}
-	A.Answer = make([]*rlwe.Ciphertext, len(s.Answer))
-	for i, a := range s.Answer {
-		A.Answer[i] = new(rlwe.Ciphertext)
-		err = A.Answer[i].UnmarshalBinary(a)
-		if err != nil {
-			return err
+	if s.Answer != nil {
+		A.Answer = make([]*rlwe.Ciphertext, len(s.Answer))
+		for i, a := range s.Answer {
+			A.Answer[i] = new(rlwe.Ciphertext)
+			err = A.Answer[i].UnmarshalBinary(a)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	A.Error, A.Ok, A.Context, A.FetchContext = s.Error, s.Ok, s.Context, s.FetchContext
