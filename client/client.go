@@ -500,7 +500,7 @@ func (PC *PIRClient) SendQuery(query *messages.PIRQuery, address string) (*messa
 			utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "error": err.Error()}).Error("Json Decode Error")
 			return nil, err
 		}
-		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "ok": pirAnswer.Ok, "error": pirAnswer.Error, "fetch-context": pirAnswer.FetchContext}).Info("Answer")
+		utils.Logger.WithFields(logrus.Fields{"service": "GRPC", "ok": pirAnswer.Ok, "error": pirAnswer.Error, "fetch-context": pirAnswer.FetchContext, "len": len(pirAnswer.Answer)}).Info("Answer")
 		return pirAnswer, err
 	} else {
 		return nil, errors.New("gRPC Answer Message: error= " + resp.GetError())

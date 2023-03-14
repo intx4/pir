@@ -30,7 +30,7 @@ func (A *PIRAnswer) MarshalBinary() ([]byte, error) {
 		Error:        A.Error,
 		Ok:           A.Ok,
 	}
-	if s.Answer != nil {
+	if A.Answer != nil {
 		s.Answer = make([][]byte, len(A.Answer))
 		for i, a := range A.Answer {
 			s.Answer[i], _ = a.MarshalBinary()
