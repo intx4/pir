@@ -142,8 +142,12 @@ func (q *PIRQuery) MarshalBinary() ([]byte, error) {
 		Profile:      nil,
 		FetchContext: q.FetchContext,
 	}
-	s.Q, _ = q.Q.MarshalBinary()
-	s.Profile, _ = q.Profile.MarshalBinary()
+	if q.Q != nil {
+		s.Q, _ = q.Q.MarshalBinary()
+	}
+	if q.Profile != nil {
+		s.Profile, _ = q.Profile.MarshalBinary()
+	}
 	return json.Marshal(s)
 }
 
@@ -170,14 +174,18 @@ func (q *PIRQuery) UnMarshalBinary(b []byte) error {
 		return err
 	}
 	q.Q = new(PIRQueryItemContainer)
-	err = q.Q.UnMarshalBinary(s.Q)
+	if s.Q != nil {
+		err = q.Q.UnMarshalBinary(s.Q)
+	}
 	if err != nil {
 		return err
 	}
 	q.Profile = new(settings.PIRProfile)
-	err = q.Profile.UnMarshalBinary(s.Profile)
-	if err != nil {
-		return err
+	if s.Profile != nil {
+		err = q.Profile.UnMarshalBinary(s.Profile)
+		if err != nil {
+			return err
+		}
 	}
 	q.Seed, q.ClientId, q.Leakage, q.FetchContext, q.Prefix = s.Seed, s.ClientId, s.Leakage, s.FetchContext, s.Prefix
 	return nil
