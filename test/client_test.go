@@ -148,7 +148,7 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 
 	defer csvFile.Close()
 
-	headers := []string{"entries", "size", "dimentions", "N", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "withTLS", "DL", "UL", "leakedBits", "informationBits"}
+	headers := []string{"entries", "size", "dimentions", "N", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "withTLS", "DL", "UL", "leakedBits", "informationBits", "keys"}
 	if !skipHeader {
 		csvW.Write(headers)
 	}
@@ -336,7 +336,7 @@ func testClientRetrieval(t *testing.T, path string, expansion bool, weaklyPrivat
 						onlineTime := queryGenTime + answerGenTime + answerGetTime + queryUploadCost + downloadCost + 2.0*(50.0/1000.0)
 						onlineTimeNoKeys := onlineTime - queryUploadCost + queryNoEvtKeysUploadCost + 2.0*(50.0/1000.0)
 						//{"entries", "size", "dimentions", "LogN", "ecd_time", "ecd_size", "query_gen_time", "query_size", "query_size_no_evt_keys", "answer_gen_time", "answer_size", "answer_get_time", "online_time", "online_time_no_evt_keys", "baseline", "leakedBits", "informationBits"}
-						records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %d, %d, %f, %d, %f, %f, %f, %f, %d, %f, %f, %f, %f", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, querySize, querySizeNoEvtKeys, answerGenTime, answerSize, answerGetTime, onlineTime, onlineTimeNoKeys, baseLine, withTLS, DLSpeed/Mb, DLSpeed/Mb, leakedBits, math.Log2(float64(entries)))
+						records := fmt.Sprintf("%d, %d, %d, %d, %f, %d, %f, %d, %d, %f, %d, %f, %f, %f, %f, %d, %f, %f, %f, %f, %d", entries, size/8, dimentions, logN, ecdTime, ecdSize, queryGenTime, querySize, querySizeNoEvtKeys, answerGenTime, answerSize, answerGetTime, onlineTime, onlineTimeNoKeys, baseLine, withTLS, DLSpeed/Mb, DLSpeed/Mb, leakedBits, math.Log2(float64(entries)), ctx.K)
 						err = csvW.Write(strings.Split(records, ","))
 						if err != nil {
 							t.Logf(err.Error())
