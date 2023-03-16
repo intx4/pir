@@ -1,4 +1,4 @@
-# Implementation of MulPIR PIR scheme
+# Partition based Weakly Private Information Retrieval based on the MulPIR scheme
 Refer to the master branch for more details on the project.
 ### RUNNING
 A test-suite is available in ```/test``` for testing the protocol (no network communication involved) in ```client_test.go```.
