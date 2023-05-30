@@ -1,8 +1,8 @@
-# Enabling Practical Privacy-Preserving Lawful Interception in 5G Core with Lattice-Based Weakly Private Information Retrieval
+# P3LI5: Enabling Practical Privacy-Preserving Lawful Interception in 5G Core
 
 This repository contains the code for *SparseWPIR*, a partition based Weakly-Private Information Retrieval scheme (WPIR) which
 supports both a classical Keyword PIR scheme (based on [Sparse-MulPIR](https://eprint.iacr.org/2019/1483)) and a WPIR scheme based on partition.
-This repository is part of my master thesis project at EPFL and Armasuisse CYD campus called "P3LI5: Enabling Practical Privacy-Preserving Lawful Interception in 5G Core with Lattice-Based Weakly Private Information Retrieval". Check [P3LI5](https://github.com/intx4/P3LI5) for more reference on the project.
+Check [P3LI5](https://github.com/intx4/P3LI5) for more reference on the project.
 
 ## BRANCHES
 
